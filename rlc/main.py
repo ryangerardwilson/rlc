@@ -22,9 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="Optional file path to play directly, or directory path to use as music dir",
     )
-    parser.add_argument("-f", type=int, help="UI frames per second")
+    parser.add_argument("-f", dest="fps", type=int, help="UI frames per second")
     parser.add_argument(
         "-c",
+        dest="config",
         help="Path to config file (defaults to $XDG_CONFIG_HOME/rlc/config.json)",
     )
     parser.add_argument(
