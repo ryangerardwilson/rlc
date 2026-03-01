@@ -65,7 +65,7 @@ def render(
         stdscr,
         0,
         0,
-        h - 1,
+        h - 2,
         left_w,
         "Library",
         border_attr=attr_dim(),
@@ -75,7 +75,7 @@ def render(
         stdscr,
         0,
         left_w,
-        h - 1,
+        h - 2,
         right_w,
         "Now Playing",
         border_attr=attr_dim(),
@@ -106,7 +106,7 @@ def render(
     )
 
     vis_y = info_y + 3
-    vis_h = max(3, h - vis_y - 2)
+    vis_h = max(3, h - vis_y - 3)
     vis_w = max(6, right_w - 2)
     bars = render_bars(
         vis_w,
@@ -126,6 +126,8 @@ def render(
         else:
             vis_attr = attr_base()
         _safe_addstr(stdscr, vis_y + row, left_w + 1, line, vis_attr)
+    progress_line = _progress_line(max(10, w), state)
+    _safe_addstr(stdscr, h - 2, 0, progress_line, attr_dim())
 
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
@@ -158,7 +160,7 @@ def _render_single_track(
         stdscr,
         0,
         0,
-        h - 1,
+        h - 2,
         w,
         "Now Playing",
         border_attr=attr_dim(),
@@ -170,7 +172,7 @@ def _render_single_track(
     _safe_addstr(stdscr, info_y + 1, 1, f"Status: {_playback_status(state)}", attr_base())
 
     vis_y = info_y + 3
-    vis_h = max(3, h - vis_y - 2)
+    vis_h = max(3, h - vis_y - 3)
     vis_w = max(6, w - 2)
     bars = render_bars(
         vis_w,
@@ -190,6 +192,8 @@ def _render_single_track(
         else:
             vis_attr = attr_base()
         _safe_addstr(stdscr, vis_y + row, 1, line, vis_attr)
+    progress_line = _progress_line(max(10, w), state)
+    _safe_addstr(stdscr, h - 2, 0, progress_line, attr_dim())
 
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
@@ -213,9 +217,11 @@ def _render_shortcuts(stdscr: curses.window, h: int, w: int) -> None:
         "Navigation: j/k",
         "Play selected: l",
         "Pause/resume: Space",
-        "Stop: s",
+        "Seek forward/back: f / b",
+        "Stop: x",
         "Delete selected track: dd",
-        "Shuffle playlist: p",
+        "Shuffle playlist: s",
+        "Move track down/up: Ctrl+j / Ctrl+k",
         "Command bar: :",
         "Search prompt: /",
         "Search next/prev: n / N",
@@ -235,3 +241,41 @@ def _render_shortcuts(stdscr: curses.window, h: int, w: int) -> None:
         y += 1
 
     _safe_addstr(stdscr, h - 1, 0, "Press ? to close", attr_dim())
+
+
+def _progress_line(width: int, state: AppState) -> str:
+    elapsed = _projected_elapsed_seconds(state)
+    duration = state.playback.duration_seconds
+    time_text = f"{_fmt_time(elapsed)} / {_fmt_time(duration)}"
+
+    min_bar = 10
+    # total line = "[" + bar + "]" + " " + time_text
+    #            = bar_w + 3 + len(time_text)
+    bar_w = max(min_bar, width - len(time_text) - 3)
+    if duration and duration > 0:
+        pct = min(1.0, max(0.0, elapsed / duration))
+    else:
+        pct = 0.0
+    filled = int(round(bar_w * pct))
+    bar = "[" + ("#" * filled).ljust(bar_w, "-") + "]"
+    line = f"{bar} {time_text}"
+    return line[:width].ljust(width)
+
+
+def _projected_elapsed_seconds(state: AppState) -> float:
+    elapsed = max(0.0, state.playback.elapsed_seconds + state.ui.pending_seek_delta)
+    duration = state.playback.duration_seconds
+    if duration is not None and duration > 0:
+        return min(duration, elapsed)
+    return elapsed
+
+
+def _fmt_time(value: float | None) -> str:
+    if value is None:
+        return "--:--"
+    total = max(0, int(value))
+    minutes, seconds = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"

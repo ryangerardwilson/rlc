@@ -44,7 +44,7 @@ class FFMpegSpectrumAnalyzer:
     def available(self) -> bool:
         return self._ffmpeg_path is not None
 
-    def start(self, track_path: Path) -> None:
+    def start(self, track_path: Path, *, position: float = 0.0) -> None:
         self.stop()
         if not self._ffmpeg_path:
             return
@@ -56,12 +56,16 @@ class FFMpegSpectrumAnalyzer:
         self._paused = False
 
         self._stop_event.clear()
-        self._proc = subprocess.Popen(
+        cmd = [
+            self._ffmpeg_path,
+            "-v",
+            "error",
+            "-re",
+        ]
+        if position > 0:
+            cmd.extend(["-ss", f"{position:.3f}"])
+        cmd.extend(
             [
-                self._ffmpeg_path,
-                "-v",
-                "error",
-                "-re",
                 "-i",
                 str(track_path),
                 "-f",
@@ -71,7 +75,11 @@ class FFMpegSpectrumAnalyzer:
                 "-ar",
                 str(self.sample_rate),
                 "-",
-            ],
+            ]
+        )
+
+        self._proc = subprocess.Popen(
+            cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

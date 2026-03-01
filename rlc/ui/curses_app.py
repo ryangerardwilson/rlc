@@ -11,6 +11,7 @@ from pathlib import Path
 from rlc.config import AppConfig
 from rlc.library import (
     display_name,
+    duration_seconds,
     download_youtube_audio,
     is_supported_youtube_url,
     scan_music_files,
@@ -56,26 +57,17 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     elif config.startup_track:
         state.ui.status_line = f"Startup track: {config.startup_track.name}"
     else:
-        state.ui.status_line = f"Loaded {len(tracks)} tracks."
+        state.ui.status_line = f"Loaded {len(tracks)} tracks. ? for shortcuts"
 
     if config.startup_track and tracks and player.available():
-        try:
-            track = tracks[0]
-            player.play(track)
-            analyzer.start(track)
-            state.playback.now_playing = track.name
-            state.playback.is_playing = True
-            state.playback.is_paused = False
-            state.ui.selected_index = 0
-            state.ui.status_line = f"Playing: {track.name}"
-        except Exception as exc:  # pragma: no cover
-            state.ui.status_line = f"Playback error: {exc}"
+        _play_index(0, state, tracks, player, analyzer)
 
     last_frame = 0.0
     frame_interval = 1.0 / max(1, config.fps)
 
     try:
         while not state.ui.should_quit:
+            _flush_pending_seek(state, tracks, player, analyzer)
             should_rescan = _process_download_events(state, download_results)
             if should_rescan:
                 tracks = (
@@ -130,6 +122,7 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
             is_playing = player.is_playing()
             state.playback.is_playing = is_playing
             state.playback.is_paused = player.is_paused()
+            state.playback.elapsed_seconds = player.current_position()
             state.playback.spectrum_levels = analyzer.levels()
             state.playback.spectrum_peaks = analyzer.peaks()
 
@@ -140,7 +133,9 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
                     state.playback.spectrum_levels = analyzer.levels()
                     state.playback.spectrum_peaks = analyzer.peaks()
                     state.playback.is_paused = False
-                elif state.ui.playlist_mode and tracks:
+                    state.playback.elapsed_seconds = 0.0
+                    state.playback.duration_seconds = None
+                elif tracks and len(tracks) > 1:
                     next_index = (state.ui.selected_index + 1) % len(tracks)
                     _play_index(next_index, state, tracks, player, analyzer)
                 else:
@@ -148,6 +143,8 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
                     state.playback.spectrum_levels = analyzer.levels()
                     state.playback.spectrum_peaks = analyzer.peaks()
                     state.playback.is_paused = False
+                    state.playback.elapsed_seconds = 0.0
+                    state.playback.duration_seconds = None
 
             now = time.monotonic()
             if now - last_frame >= frame_interval:
@@ -194,6 +191,24 @@ def _handle_key(
         state.ui.selected_index = max(0, state.ui.selected_index - 1)
         return
 
+    if action.name == "move_item_down" and tracks:
+        i = state.ui.selected_index
+        if i < len(tracks) - 1:
+            tracks[i], tracks[i + 1] = tracks[i + 1], tracks[i]
+            state.ui.selected_index = i + 1
+            _recompute_search_results(state, tracks)
+            state.ui.status_line = "Moved track down"
+        return
+
+    if action.name == "move_item_up" and tracks:
+        i = state.ui.selected_index
+        if i > 0:
+            tracks[i], tracks[i - 1] = tracks[i - 1], tracks[i]
+            state.ui.selected_index = i - 1
+            _recompute_search_results(state, tracks)
+            state.ui.status_line = "Moved track up"
+        return
+
     if action.name == "command_mode":
         state.ui.command_mode = True
         state.ui.command_prefix = ":"
@@ -207,17 +222,23 @@ def _handle_key(
         return
 
     if action.name == "stop":
+        state.ui.pending_seek_delta = 0.0
+        state.ui.pending_seek_deadline = 0.0
         player.stop()
         analyzer.stop()
         state.playback.spectrum_levels = analyzer.levels()
         state.playback.spectrum_peaks = analyzer.peaks()
         state.playback.is_playing = False
         state.playback.is_paused = False
+        state.playback.elapsed_seconds = 0.0
+        state.playback.duration_seconds = None
         state.playback.suppress_autonext_once = True
         state.ui.status_line = "Stopped"
         return
 
     if action.name == "toggle_pause":
+        state.ui.pending_seek_delta = 0.0
+        state.ui.pending_seek_deadline = 0.0
         if not state.playback.is_playing:
             state.ui.status_line = "Nothing is playing"
             return
@@ -225,6 +246,14 @@ def _handle_key(
         analyzer.set_paused(paused)
         state.playback.is_paused = paused
         state.ui.status_line = "Paused" if paused else "Resumed"
+        return
+
+    if action.name == "seek_forward":
+        _queue_seek(state, +10.0)
+        return
+
+    if action.name == "seek_backward":
+        _queue_seek(state, -10.0)
         return
 
     if action.name == "search_next":
@@ -246,14 +275,14 @@ def _handle_key(
             return
         random.shuffle(tracks)
         state.ui.selected_index = 0
-        state.ui.playlist_mode = True
         _recompute_search_results(state, tracks)
         _play_index(0, state, tracks, player, analyzer)
-        state.ui.status_line = f"Playlist mode on ({len(tracks)} tracks)"
+        state.ui.status_line = f"Shuffled playlist ({len(tracks)} tracks)"
         return
 
     if action.name == "play_selected":
-        state.ui.playlist_mode = False
+        state.ui.pending_seek_delta = 0.0
+        state.ui.pending_seek_deadline = 0.0
         _play_index(state.ui.selected_index, state, tracks, player, analyzer)
         return
 
@@ -511,7 +540,52 @@ def _play_index(
         state.playback.now_playing = track.name
         state.playback.is_playing = True
         state.playback.is_paused = False
+        state.playback.elapsed_seconds = 0.0
+        state.playback.duration_seconds = duration_seconds(track)
         state.playback.suppress_autonext_once = False
         state.ui.status_line = f"Playing: {track.name}"
     except Exception as exc:  # pragma: no cover
         state.ui.status_line = f"Playback error: {exc}"
+
+
+def _queue_seek(state: AppState, delta: float) -> None:
+    state.ui.pending_seek_delta += delta
+    state.ui.pending_seek_deadline = time.monotonic() + 0.5
+    target = max(0.0, state.playback.elapsed_seconds + state.ui.pending_seek_delta)
+    state.ui.status_line = _seek_status_text("Seek target", target, state.playback.duration_seconds)
+
+
+def _flush_pending_seek(
+    state: AppState,
+    tracks: list[Path],
+    player: FFplayBackend,
+    analyzer: FFMpegSpectrumAnalyzer,
+) -> None:
+    if state.ui.pending_seek_delta == 0:
+        return
+    if time.monotonic() < state.ui.pending_seek_deadline:
+        return
+
+    delta = state.ui.pending_seek_delta
+    state.ui.pending_seek_delta = 0.0
+    state.ui.pending_seek_deadline = 0.0
+
+    if not tracks:
+        state.ui.status_line = "No tracks available"
+        return
+
+    pos = player.seek_relative(delta)
+    if pos is None:
+        state.ui.status_line = "Cannot seek while stopped/paused"
+        return
+
+    analyzer.start(tracks[state.ui.selected_index], position=pos)
+    state.playback.elapsed_seconds = pos
+    state.ui.status_line = _seek_status_text("Seeked to", pos, state.playback.duration_seconds)
+
+
+def _seek_status_text(prefix: str, position: float, duration: float | None) -> str:
+    if duration and duration > 0:
+        pct = int(round(min(100.0, max(0.0, (position / duration) * 100.0))))
+        return f"{prefix}: {pct}%"
+    return f"{prefix}: --%"

@@ -69,20 +69,25 @@ Supported config keys:
 ## Keyboard shortcuts
 
 - `j` / `k` - move track selection down/up
+- `Ctrl+j` / `Ctrl+k` - move selected track down/up in playlist order
 - `l` - play selected track
 - `Space` - pause/resume current track
+- `f` / `b` - seek forward/backward by 10 seconds (rapid taps are batched)
 - `dd` - delete selected track (press `d` twice quickly)
-- `p` - shuffle playlist/library order
+- `s` - shuffle playlist/library order
 - `:` - open command bar
 - `/` - open search prompt
-- `s` - stop playback
+- `x` - stop playback
 - `n` / `N` - next/previous search result (after `/` search)
 - `?` - toggle shortcuts screen
 - `q` - quit
 
 Command bar actions:
 - `:name.mp3 https://...` - download YouTube audio into music directory
-- `:/query` - contains search over track names; if no direct match, falls back to fuzzy search
+- `/query` - startswith, then contains, then fuzzy fallback
+
+Playback behavior:
+- By default, when a track ends, `rlc` plays the next track in the current library order.
 
 ---
 

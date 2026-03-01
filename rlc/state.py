@@ -9,7 +9,6 @@ class UIState:
     should_quit: bool = False
     status_line: str = "Ready"
     show_shortcuts: bool = False
-    playlist_mode: bool = False
     single_track_mode: bool = False
     command_mode: bool = False
     command_prefix: str = ":"
@@ -20,6 +19,8 @@ class UIState:
     search_cursor: int = -1
     search_is_fuzzy: bool = False
     search_mode_label: str = "Search"
+    pending_seek_delta: float = 0.0
+    pending_seek_deadline: float = 0.0
 
 
 @dataclass(slots=True)
@@ -28,6 +29,8 @@ class PlaybackState:
     is_playing: bool = False
     is_paused: bool = False
     suppress_autonext_once: bool = False
+    elapsed_seconds: float = 0.0
+    duration_seconds: float | None = None
     spectrum_levels: list[float] = field(default_factory=lambda: [0.0] * 24)
     spectrum_peaks: list[float] = field(default_factory=lambda: [0.0] * 24)
 
