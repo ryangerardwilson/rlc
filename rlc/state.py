@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(slots=True)
+class UIState:
+    selected_index: int = 0
+    should_quit: bool = False
+    status_line: str = "Ready"
+
+
+@dataclass(slots=True)
+class PlaybackState:
+    now_playing: str | None = None
+    is_playing: bool = False
+    spectrum_levels: list[float] = field(default_factory=lambda: [0.0] * 24)
+    spectrum_peaks: list[float] = field(default_factory=lambda: [0.0] * 24)
+
+
+@dataclass(slots=True)
+class AppState:
+    ui: UIState = field(default_factory=UIState)
+    playback: PlaybackState = field(default_factory=PlaybackState)
