@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-u",
+        dest="upgrade",
         action="store_true",
         help="Upgrade to latest release using install.sh",
     )
