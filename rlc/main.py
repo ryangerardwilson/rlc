@@ -13,33 +13,35 @@ from rlc.config import build_app_config, default_config_path, load_user_config, 
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="rlc terminal music player")
+    parser = argparse.ArgumentParser(
+        description="rlc terminal music player",
+        add_help=False,
+    )
     parser.add_argument(
         "target",
         nargs="?",
         help="Optional file path to play directly, or directory path to use as music dir",
     )
+    parser.add_argument("-f", type=int, help="UI frames per second")
     parser.add_argument(
-        "--music-dir",
-        help="Directory to scan for music files (overrides config file)",
-    )
-    parser.add_argument("--fps", type=int, help="UI frames per second")
-    parser.add_argument(
-        "--config",
+        "-c",
         help="Path to config file (defaults to $XDG_CONFIG_HOME/rlc/config.json)",
     )
     parser.add_argument(
         "-v",
-        "--version",
         action="version",
         version=__version__,
         help="Show version and exit",
     )
     parser.add_argument(
         "-u",
-        "--upgrade",
         action="store_true",
         help="Upgrade to latest release using install.sh",
+    )
+    parser.add_argument(
+        "-h",
+        action="help",
+        help="Show usage summary",
     )
     return parser
 
@@ -68,13 +70,10 @@ def main() -> int:
     if args.config:
         config_path = Path(args.config).expanduser().resolve()
 
-    # Persist explicit --music-dir for first-time users, but not temporary target-path mode.
-    if args.music_dir:
-        _bootstrap_first_run_config(config_path=config_path, cli_music_dir=args.music_dir)
-    elif not args.target:
+    if not args.target:
         _bootstrap_first_run_config(config_path=config_path, cli_music_dir=None)
 
-    effective_music_dir = args.music_dir or target_music_dir
+    effective_music_dir = target_music_dir
 
     config = build_app_config(
         cli_music_dir=effective_music_dir,
