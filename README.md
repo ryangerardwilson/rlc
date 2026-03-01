@@ -74,13 +74,15 @@ Supported config keys:
 - `Space` - pause/resume current track
 - `dd` - delete selected track (press `d` twice quickly)
 - `:` - open command bar
+- `/` - open search prompt
 - `s` - stop playback
 - `n` / `p` - next/previous search result (after `/` search)
+- `?` - toggle shortcuts screen
 - `q` - quit
 
 Command bar actions:
 - `:name.mp3 https://...` - download YouTube audio into music directory
-- `:/query` - simple contains search over library track names
+- `:/query` - contains search over track names; if no direct match, falls back to fuzzy search
 
 ---
 

@@ -10,8 +10,10 @@ class KeyAction:
 
 KEY_ACTIONS = {
     ord("q"): KeyAction("quit"),
+    ord("?"): KeyAction("toggle_help"),
     ord("j"): KeyAction("down"),
     ord("k"): KeyAction("up"),
+    ord("/"): KeyAction("search_mode"),
     ord("l"): KeyAction("play_selected"),
     ord(" "): KeyAction("toggle_pause"),
     ord("n"): KeyAction("search_next"),

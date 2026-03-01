@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+import difflib
 import queue
 import threading
 import time
@@ -54,9 +55,7 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     elif config.startup_track:
         state.ui.status_line = f"Startup track: {config.startup_track.name}"
     else:
-        state.ui.status_line = (
-            f"Loaded {len(tracks)} tracks. l=play space=pause dd=delete :=name.mp3 <url>"
-        )
+        state.ui.status_line = f"Loaded {len(tracks)} tracks."
 
     if config.startup_track and tracks and player.available():
         try:
@@ -161,6 +160,17 @@ def _handle_key(
     if not action:
         return
 
+    if action.name == "toggle_help":
+        state.ui.show_shortcuts = not state.ui.show_shortcuts
+        state.ui.command_mode = False
+        state.ui.command_prefix = ":"
+        state.ui.command_buffer = ""
+        state.ui.status_line = "Shortcuts" if state.ui.show_shortcuts else "Ready"
+        return
+
+    if state.ui.show_shortcuts:
+        return
+
     if action.name == "quit":
         state.ui.should_quit = True
         return
@@ -175,6 +185,13 @@ def _handle_key(
 
     if action.name == "command_mode":
         state.ui.command_mode = True
+        state.ui.command_prefix = ":"
+        state.ui.command_buffer = ""
+        return
+
+    if action.name == "search_mode":
+        state.ui.command_mode = True
+        state.ui.command_prefix = "/"
         state.ui.command_buffer = ""
         return
 
@@ -233,24 +250,27 @@ def _handle_command_key(
 ) -> threading.Thread | None:
     if key in (27,):  # Esc
         state.ui.command_mode = False
+        state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
         state.ui.status_line = "Command cancelled"
         return download_thread
 
     if key in (10, 13):  # Enter
         command = state.ui.command_buffer.strip()
+        prefix = state.ui.command_prefix
         state.ui.command_mode = False
+        state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
         if not command:
             state.ui.status_line = "Command cancelled"
             return download_thread
 
-        if download_thread and download_thread.is_alive():
-            state.ui.status_line = "Download already in progress"
+        if prefix == "/":
+            _run_search_command(state, tracks, command)
             return download_thread
 
-        if command.startswith("/"):
-            _run_search_command(state, tracks, command[1:])
+        if download_thread and download_thread.is_alive():
+            state.ui.status_line = "Download already in progress"
             return download_thread
 
         parsed = _parse_download_command(command)
@@ -331,15 +351,33 @@ def _run_search_command(state: AppState, tracks: list[Path], raw_query: str) -> 
     if not query:
         state.ui.search_results = []
         state.ui.search_cursor = -1
+        state.ui.search_is_fuzzy = False
+        state.ui.search_mode_label = "Search"
         state.ui.status_line = "Search cleared"
         return
 
-    results = [
+    startswith_results = [
+        i for i, track in enumerate(tracks) if display_name(track).lower().startswith(query)
+    ]
+    contains_results = [
         i for i, track in enumerate(tracks) if query in display_name(track).lower()
     ]
+
+    results = startswith_results or contains_results
+    is_fuzzy = False
+    mode_label = "Prefix" if startswith_results else "Search"
+    if not results:
+        results = _fuzzy_search_indices(tracks, query)
+        is_fuzzy = bool(results)
+        if is_fuzzy:
+            mode_label = "Fuzzy"
+
     state.ui.search_results = results
+    state.ui.search_is_fuzzy = is_fuzzy
+    state.ui.search_mode_label = mode_label
     if not results:
         state.ui.search_cursor = -1
+        state.ui.search_mode_label = "Search"
         state.ui.status_line = f"No results for '{query}'"
         return
 
@@ -362,13 +400,46 @@ def _jump_search_result(state: AppState, *, step: int) -> bool:
 def _search_status(state: AppState) -> str:
     total = len(state.ui.search_results)
     idx = state.ui.search_cursor + 1 if state.ui.search_cursor >= 0 else 0
-    return f"Search '{state.ui.search_query}': {idx}/{total} (n/p)"
+    mode = state.ui.search_mode_label
+    return f"{mode} '{state.ui.search_query}': {idx}/{total} (n/p)"
 
 
 def _recompute_search_results(state: AppState, tracks: list[Path]) -> None:
     if not state.ui.search_query:
         return
     _run_search_command(state, tracks, state.ui.search_query)
+
+
+def _fuzzy_search_indices(
+    tracks: list[Path],
+    query: str,
+    *,
+    min_score: float = 0.28,
+    max_results: int = 200,
+) -> list[int]:
+    scored: list[tuple[float, int]] = []
+    for i, track in enumerate(tracks):
+        name = display_name(track).lower()
+        normalized = name.replace("_", " ").replace("-", " ")
+
+        ratio = max(
+            difflib.SequenceMatcher(a=query, b=name).ratio(),
+            difflib.SequenceMatcher(a=query, b=normalized).ratio(),
+        )
+        if _is_subsequence(query, name) or _is_subsequence(query, normalized):
+            ratio += 0.25
+        if query and query[0] == (name[:1] or ""):
+            ratio += 0.05
+        if ratio >= min_score:
+            scored.append((ratio, i))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [idx for _, idx in scored[:max_results]]
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    it = iter(haystack)
+    return all(ch in it for ch in needle)
 
 
 def _delete_selected_track(

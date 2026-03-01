@@ -39,7 +39,10 @@ def render_bars(
             canvas[y][x0] = ch
             canvas[y][x1] = ch
 
-        peak_row = (height - 1) - int(sampled_peaks[i] * (height - 1))
+        peak_level = sampled_peaks[i]
+        if peak_level <= 0.02:
+            continue
+        peak_row = (height - 1) - int(peak_level * (height - 1))
         if 0 <= peak_row < height:
             canvas[peak_row][x0] = "|"
             canvas[peak_row][x1] = "|"

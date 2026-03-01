@@ -8,13 +8,17 @@ class UIState:
     selected_index: int = 0
     should_quit: bool = False
     status_line: str = "Ready"
+    show_shortcuts: bool = False
     single_track_mode: bool = False
     command_mode: bool = False
+    command_prefix: str = ":"
     command_buffer: str = ""
     download_in_progress: bool = False
     search_query: str = ""
     search_results: list[int] = field(default_factory=list)
     search_cursor: int = -1
+    search_is_fuzzy: bool = False
+    search_mode_label: str = "Search"
 
 
 @dataclass(slots=True)

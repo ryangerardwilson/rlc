@@ -47,6 +47,11 @@ def render(
     stdscr.erase()
     h, w = stdscr.getmaxyx()
 
+    if state.ui.show_shortcuts:
+        _render_shortcuts(stdscr, h, w)
+        stdscr.refresh()
+        return
+
     if state.ui.single_track_mode:
         _render_single_track(stdscr, state, h, w)
         stdscr.refresh()
@@ -124,7 +129,7 @@ def render(
 
     _safe_addstr(stdscr, h - 2, 0, "-" * max(0, w - 1), attr_dim())
     if state.ui.command_mode:
-        prompt = ":" + state.ui.command_buffer
+        prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
     else:
         _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
@@ -189,7 +194,45 @@ def _render_single_track(
 
     _safe_addstr(stdscr, h - 2, 0, "-" * max(0, w - 1), attr_dim())
     if state.ui.command_mode:
-        prompt = ":" + state.ui.command_buffer
+        prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
     else:
         _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
+
+
+def _render_shortcuts(stdscr: curses.window, h: int, w: int) -> None:
+    draw_box(
+        stdscr,
+        0,
+        0,
+        h - 1,
+        w,
+        "Shortcuts",
+        border_attr=attr_dim(),
+        title_attr=attr_bright(),
+    )
+    lines = [
+        "Navigation: j/k",
+        "Play selected: l",
+        "Pause/resume: Space",
+        "Stop: s",
+        "Delete selected track: dd",
+        "Command bar: :",
+        "Search prompt: /",
+        "Search next/prev: n / p",
+        "Toggle shortcuts: ?",
+        "Quit: q",
+        "",
+        "Command bar:",
+        "  :name.mp3 <youtube-url>  download to music dir",
+        "  /query                   startswith > contains > fuzzy",
+    ]
+
+    y = 2
+    for line in lines:
+        if y >= h - 2:
+            break
+        _safe_addstr(stdscr, y, 2, line, attr_base())
+        y += 1
+
+    _safe_addstr(stdscr, h - 1, 0, "Press ? to close", attr_dim())
