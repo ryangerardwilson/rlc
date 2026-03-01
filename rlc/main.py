@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tempfile
 
 from rlc import __version__
 from rlc.app import run_app
@@ -11,6 +14,11 @@ from rlc.config import build_app_config, default_config_path, load_user_config, 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="rlc terminal music player")
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="Optional file path to play directly, or directory path to use as music dir",
+    )
     parser.add_argument(
         "--music-dir",
         help="Directory to scan for music files (overrides config file)",
@@ -21,10 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to config file (defaults to $XDG_CONFIG_HOME/rlc/config.json)",
     )
     parser.add_argument(
+        "-v",
         "--version",
         action="version",
         version=__version__,
         help="Show version and exit",
+    )
+    parser.add_argument(
+        "-u",
+        "--upgrade",
+        action="store_true",
+        help="Upgrade to latest release using install.sh",
     )
     return parser
 
@@ -33,14 +48,31 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.upgrade:
+        return _upgrade_to_latest()
+
+    target_music_dir: str | None = None
+    if args.target:
+        target_path = Path(args.target).expanduser().resolve()
+        if target_path.is_file():
+            return _play_single_file(target_path)
+        if target_path.is_dir():
+            target_music_dir = str(target_path)
+        else:
+            print(f"Path not found: {target_path}", file=sys.stderr)
+            return 1
+
     config_path = default_config_path()
     if args.config:
         config_path = Path(args.config).expanduser().resolve()
 
+    # Persist explicit --music-dir for first-time users, but not temporary dir-path mode.
     _bootstrap_first_run_config(config_path=config_path, cli_music_dir=args.music_dir)
 
+    effective_music_dir = args.music_dir or target_music_dir
+
     config = build_app_config(
-        cli_music_dir=args.music_dir,
+        cli_music_dir=effective_music_dir,
         cli_fps=args.fps,
         config_path=config_path,
     )
@@ -70,6 +102,43 @@ def _bootstrap_first_run_config(*, config_path: Path, cli_music_dir: str | None)
     chosen = raw or default_dir
     resolved = str(Path(chosen).expanduser().resolve())
     save_user_config(config_path, music_dir=resolved)
+
+
+def _play_single_file(track_path: Path) -> int:
+    ffplay = shutil.which("ffplay")
+    if not ffplay:
+        print("ffplay not found in PATH. Install ffmpeg package.", file=sys.stderr)
+        return 1
+
+    proc = subprocess.run([ffplay, "-nodisp", "-autoexit", str(track_path)])
+    return proc.returncode
+
+
+def _upgrade_to_latest() -> int:
+    curl = shutil.which("curl")
+    bash = shutil.which("bash")
+    if not curl:
+        print("curl not found in PATH.", file=sys.stderr)
+        return 1
+    if not bash:
+        print("bash not found in PATH.", file=sys.stderr)
+        return 1
+
+    url = "https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh"
+    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        fetch = subprocess.run([curl, "-fsSL", url, "-o", str(tmp_path)])
+        if fetch.returncode != 0:
+            return fetch.returncode
+        run = subprocess.run([bash, str(tmp_path)])
+        return run.returncode
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
