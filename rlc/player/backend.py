@@ -18,5 +18,13 @@ class PlayerBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def toggle_pause(self) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_paused(self) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def close(self) -> None:
         raise NotImplementedError

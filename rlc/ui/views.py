@@ -91,7 +91,7 @@ def render(
         stdscr,
         info_y + 1,
         left_w + 1,
-        f"Status: {'Playing' if state.playback.is_playing else 'Stopped'}",
+        f"Status: {_playback_status(state)}",
         attr_base(),
     )
 
@@ -118,11 +118,22 @@ def render(
         _safe_addstr(stdscr, vis_y + row, left_w + 1, line, vis_attr)
 
     _safe_addstr(stdscr, h - 2, 0, "-" * max(0, w - 1), attr_dim())
-    _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
-
-    if tracks:
-        selected = tracks[state.ui.selected_index]
-        suffix = f" | Selected: {short_path(selected)}"
-        _safe_addstr(stdscr, h - 1, len(state.ui.status_line), suffix, attr_dim())
+    if state.ui.command_mode:
+        prompt = ":" + state.ui.command_buffer
+        _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
+    else:
+        _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
+        if tracks:
+            selected = tracks[state.ui.selected_index]
+            suffix = f" | Selected: {short_path(selected)}"
+            _safe_addstr(stdscr, h - 1, len(state.ui.status_line), suffix, attr_dim())
 
     stdscr.refresh()
+
+
+def _playback_status(state: AppState) -> str:
+    if state.playback.is_paused:
+        return "Paused"
+    if state.playback.is_playing:
+        return "Playing"
+    return "Stopped"

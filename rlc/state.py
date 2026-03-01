@@ -8,12 +8,19 @@ class UIState:
     selected_index: int = 0
     should_quit: bool = False
     status_line: str = "Ready"
+    command_mode: bool = False
+    command_buffer: str = ""
+    download_in_progress: bool = False
+    search_query: str = ""
+    search_results: list[int] = field(default_factory=list)
+    search_cursor: int = -1
 
 
 @dataclass(slots=True)
 class PlaybackState:
     now_playing: str | None = None
     is_playing: bool = False
+    is_paused: bool = False
     spectrum_levels: list[float] = field(default_factory=lambda: [0.0] * 24)
     spectrum_peaks: list[float] = field(default_factory=lambda: [0.0] * 24)
 

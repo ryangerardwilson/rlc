@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import signal
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,6 +13,7 @@ class FFplayBackend(PlayerBackend):
     def __init__(self) -> None:
         self._proc: subprocess.Popen[bytes] | None = None
         self._ffplay_path = shutil.which("ffplay")
+        self._paused = False
 
     def available(self) -> bool:
         return self._ffplay_path is not None
@@ -32,6 +35,7 @@ class FFplayBackend(PlayerBackend):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        self._paused = False
 
     def stop(self) -> None:
         if not self._proc:
@@ -44,9 +48,26 @@ class FFplayBackend(PlayerBackend):
                 self._proc.kill()
                 self._proc.wait(timeout=1.0)
         self._proc = None
+        self._paused = False
 
     def is_playing(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
+        alive = self._proc is not None and self._proc.poll() is None
+        if not alive:
+            self._paused = False
+        return alive
+
+    def toggle_pause(self) -> bool:
+        if not self.is_playing() or not self._proc:
+            return False
+        sig = signal.SIGCONT if self._paused else signal.SIGSTOP
+        os.kill(self._proc.pid, sig)
+        self._paused = not self._paused
+        return self._paused
+
+    def is_paused(self) -> bool:
+        if not self.is_playing():
+            return False
+        return self._paused
 
     def close(self) -> None:
         self.stop()

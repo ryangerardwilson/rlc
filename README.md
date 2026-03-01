@@ -42,8 +42,24 @@ By default, `rlc` scans `~/Music`.
 ```bash
 rlc --music-dir ~/Music   # scan and load tracks from a specific directory
 rlc --fps 30              # set UI render rate
+rlc --config ~/.config/rlc/config.json  # explicit config path
 rlc --version             # print version
 rlc --help                # show usage summary
+```
+
+Config defaults to:
+- `$XDG_CONFIG_HOME/rlc/config.json` if `XDG_CONFIG_HOME` is set
+- `~/.config/rlc/config.json` otherwise
+
+On first run, if `music_dir` is not configured, `rlc` prompts for a music
+directory and saves it into the config file.
+
+Supported config keys:
+```json
+{
+  "music_dir": "/home/you/Music",
+  "fps": 20
+}
 ```
 
 ---
@@ -51,9 +67,17 @@ rlc --help                # show usage summary
 ## Keyboard shortcuts
 
 - `j` / `k` - move track selection down/up
-- `Enter` - play selected track
+- `l` - play selected track
+- `Space` - pause/resume current track
+- `dd` - delete selected track (press `d` twice quickly)
+- `:` - open command bar
 - `s` - stop playback
+- `n` / `p` - next/previous search result (after `/` search)
 - `q` - quit
+
+Command bar actions:
+- `:name.mp3 https://...` - download YouTube audio into music directory
+- `:/query` - simple contains search over library track names
 
 ---
 
@@ -61,6 +85,7 @@ rlc --help                # show usage summary
 
 - Linux `x86_64` (for current prebuilt installer)
 - `ffplay` and `ffmpeg` available in `PATH`
+- `yt-dlp` available in `PATH` (for `:` YouTube downloads)
 
 If `ffplay` is missing, playback will not start.
 
