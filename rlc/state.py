@@ -8,6 +8,7 @@ class UIState:
     selected_index: int = 0
     should_quit: bool = False
     status_line: str = "Ready"
+    single_track_mode: bool = False
     command_mode: bool = False
     command_buffer: str = ""
     download_in_progress: bool = False

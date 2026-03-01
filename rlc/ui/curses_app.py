@@ -34,6 +34,7 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     state = AppState()
     if config.startup_track and config.startup_track.exists() and config.startup_track.is_file():
         tracks = [config.startup_track]
+        state.ui.single_track_mode = True
     else:
         tracks = scan_music_files(config.music_dir)
     player = FFplayBackend()
