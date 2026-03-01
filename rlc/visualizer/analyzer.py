@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import os
 import shutil
+import signal
 import struct
 import subprocess
 import threading
@@ -27,6 +29,7 @@ class FFMpegSpectrumAnalyzer:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._paused = False
 
         self._levels = [0.0 for _ in range(bands)]
         self._peaks = [0.0 for _ in range(bands)]
@@ -50,6 +53,7 @@ class FFMpegSpectrumAnalyzer:
         self._noise_floor = [0.0 for _ in range(self.bands)]
         self._low_baseline = 1e-6
         self._beat_env = 0.0
+        self._paused = False
 
         self._stop_event.clear()
         self._proc = subprocess.Popen(
@@ -94,6 +98,7 @@ class FFMpegSpectrumAnalyzer:
 
         self._proc = None
         self._thread = None
+        self._paused = False
 
         with self._lock:
             self._levels = [v * 0.8 for v in self._levels]
@@ -101,6 +106,17 @@ class FFMpegSpectrumAnalyzer:
 
     def close(self) -> None:
         self.stop()
+
+    def set_paused(self, paused: bool) -> None:
+        proc = self._proc
+        if not proc or proc.poll() is not None:
+            self._paused = False
+            return
+        if self._paused == paused:
+            return
+        sig = signal.SIGSTOP if paused else signal.SIGCONT
+        os.kill(proc.pid, sig)
+        self._paused = paused
 
     def levels(self) -> list[float]:
         with self._lock:

@@ -73,10 +73,11 @@ Supported config keys:
 - `l` - play selected track
 - `Space` - pause/resume current track
 - `dd` - delete selected track (press `d` twice quickly)
+- `p` - shuffle playlist/library order
 - `:` - open command bar
 - `/` - open search prompt
 - `s` - stop playback
-- `n` / `p` - next/previous search result (after `/` search)
+- `n` / `N` - next/previous search result (after `/` search)
 - `?` - toggle shortcuts screen
 - `q` - quit
 

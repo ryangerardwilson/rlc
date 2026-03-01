@@ -65,7 +65,7 @@ def render(
         stdscr,
         0,
         0,
-        h - 2,
+        h - 1,
         left_w,
         "Library",
         border_attr=attr_dim(),
@@ -75,7 +75,7 @@ def render(
         stdscr,
         0,
         left_w,
-        h - 2,
+        h - 1,
         right_w,
         "Now Playing",
         border_attr=attr_dim(),
@@ -106,7 +106,7 @@ def render(
     )
 
     vis_y = info_y + 3
-    vis_h = max(3, h - vis_y - 3)
+    vis_h = max(3, h - vis_y - 2)
     vis_w = max(6, right_w - 2)
     bars = render_bars(
         vis_w,
@@ -127,7 +127,6 @@ def render(
             vis_attr = attr_base()
         _safe_addstr(stdscr, vis_y + row, left_w + 1, line, vis_attr)
 
-    _safe_addstr(stdscr, h - 2, 0, "-" * max(0, w - 1), attr_dim())
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
@@ -159,7 +158,7 @@ def _render_single_track(
         stdscr,
         0,
         0,
-        h - 2,
+        h - 1,
         w,
         "Now Playing",
         border_attr=attr_dim(),
@@ -171,7 +170,7 @@ def _render_single_track(
     _safe_addstr(stdscr, info_y + 1, 1, f"Status: {_playback_status(state)}", attr_base())
 
     vis_y = info_y + 3
-    vis_h = max(3, h - vis_y - 3)
+    vis_h = max(3, h - vis_y - 2)
     vis_w = max(6, w - 2)
     bars = render_bars(
         vis_w,
@@ -192,7 +191,6 @@ def _render_single_track(
             vis_attr = attr_base()
         _safe_addstr(stdscr, vis_y + row, 1, line, vis_attr)
 
-    _safe_addstr(stdscr, h - 2, 0, "-" * max(0, w - 1), attr_dim())
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
@@ -217,9 +215,10 @@ def _render_shortcuts(stdscr: curses.window, h: int, w: int) -> None:
         "Pause/resume: Space",
         "Stop: s",
         "Delete selected track: dd",
+        "Shuffle playlist: p",
         "Command bar: :",
         "Search prompt: /",
-        "Search next/prev: n / p",
+        "Search next/prev: n / N",
         "Toggle shortcuts: ?",
         "Quit: q",
         "",

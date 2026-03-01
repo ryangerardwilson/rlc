@@ -9,6 +9,7 @@ class UIState:
     should_quit: bool = False
     status_line: str = "Ready"
     show_shortcuts: bool = False
+    playlist_mode: bool = False
     single_track_mode: bool = False
     command_mode: bool = False
     command_prefix: str = ":"
@@ -26,6 +27,7 @@ class PlaybackState:
     now_playing: str | None = None
     is_playing: bool = False
     is_paused: bool = False
+    suppress_autonext_once: bool = False
     spectrum_levels: list[float] = field(default_factory=lambda: [0.0] * 24)
     spectrum_peaks: list[float] = field(default_factory=lambda: [0.0] * 24)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import curses
 import difflib
 import queue
+import random
 import threading
 import time
 from pathlib import Path
@@ -133,10 +134,20 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
             state.playback.spectrum_peaks = analyzer.peaks()
 
             if was_playing and not is_playing:
-                analyzer.stop()
-                state.playback.spectrum_levels = analyzer.levels()
-                state.playback.spectrum_peaks = analyzer.peaks()
-                state.playback.is_paused = False
+                if state.playback.suppress_autonext_once:
+                    state.playback.suppress_autonext_once = False
+                    analyzer.stop()
+                    state.playback.spectrum_levels = analyzer.levels()
+                    state.playback.spectrum_peaks = analyzer.peaks()
+                    state.playback.is_paused = False
+                elif state.ui.playlist_mode and tracks:
+                    next_index = (state.ui.selected_index + 1) % len(tracks)
+                    _play_index(next_index, state, tracks, player, analyzer)
+                else:
+                    analyzer.stop()
+                    state.playback.spectrum_levels = analyzer.levels()
+                    state.playback.spectrum_peaks = analyzer.peaks()
+                    state.playback.is_paused = False
 
             now = time.monotonic()
             if now - last_frame >= frame_interval:
@@ -202,6 +213,7 @@ def _handle_key(
         state.playback.spectrum_peaks = analyzer.peaks()
         state.playback.is_playing = False
         state.playback.is_paused = False
+        state.playback.suppress_autonext_once = True
         state.ui.status_line = "Stopped"
         return
 
@@ -210,6 +222,7 @@ def _handle_key(
             state.ui.status_line = "Nothing is playing"
             return
         paused = player.toggle_pause()
+        analyzer.set_paused(paused)
         state.playback.is_paused = paused
         state.ui.status_line = "Paused" if paused else "Resumed"
         return
@@ -224,20 +237,25 @@ def _handle_key(
             state.ui.status_line = _search_status(state)
         return
 
-    if action.name == "play_selected":
-        if not tracks:
-            state.ui.status_line = "No tracks available"
+    if action.name == "shuffle_playlist":
+        if state.ui.single_track_mode:
+            state.ui.status_line = "Single track mode: nothing to shuffle"
             return
-        track = tracks[state.ui.selected_index]
-        try:
-            player.play(track)
-            analyzer.start(track)
-            state.playback.now_playing = track.name
-            state.playback.is_playing = True
-            state.playback.is_paused = False
-            state.ui.status_line = f"Playing: {track.name}"
-        except Exception as exc:  # pragma: no cover
-            state.ui.status_line = f"Playback error: {exc}"
+        if len(tracks) < 2:
+            state.ui.status_line = "Need at least 2 tracks to shuffle"
+            return
+        random.shuffle(tracks)
+        state.ui.selected_index = 0
+        state.ui.playlist_mode = True
+        _recompute_search_results(state, tracks)
+        _play_index(0, state, tracks, player, analyzer)
+        state.ui.status_line = f"Playlist mode on ({len(tracks)} tracks)"
+        return
+
+    if action.name == "play_selected":
+        state.ui.playlist_mode = False
+        _play_index(state.ui.selected_index, state, tracks, player, analyzer)
+        return
 
 
 def _handle_command_key(
@@ -472,3 +490,28 @@ def _clamp_selection(state: AppState, tracks: list[Path]) -> None:
         state.ui.selected_index = 0
         return
     state.ui.selected_index = min(state.ui.selected_index, len(tracks) - 1)
+
+
+def _play_index(
+    index: int,
+    state: AppState,
+    tracks: list[Path],
+    player: FFplayBackend,
+    analyzer: FFMpegSpectrumAnalyzer,
+) -> None:
+    if not tracks:
+        state.ui.status_line = "No tracks available"
+        return
+    safe_index = max(0, min(index, len(tracks) - 1))
+    track = tracks[safe_index]
+    try:
+        player.play(track)
+        analyzer.start(track)
+        state.ui.selected_index = safe_index
+        state.playback.now_playing = track.name
+        state.playback.is_playing = True
+        state.playback.is_paused = False
+        state.playback.suppress_autonext_once = False
+        state.ui.status_line = f"Playing: {track.name}"
+    except Exception as exc:  # pragma: no cover
+        state.ui.status_line = f"Playback error: {exc}"

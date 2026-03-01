@@ -17,7 +17,8 @@ KEY_ACTIONS = {
     ord("l"): KeyAction("play_selected"),
     ord(" "): KeyAction("toggle_pause"),
     ord("n"): KeyAction("search_next"),
-    ord("p"): KeyAction("search_prev"),
+    ord("N"): KeyAction("search_prev"),
+    ord("p"): KeyAction("shuffle_playlist"),
     ord(":"): KeyAction("command_mode"),
     ord("s"): KeyAction("stop"),
 }
