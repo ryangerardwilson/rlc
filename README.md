@@ -40,7 +40,7 @@ By default, `rlc` scans `~/Music`.
 ## Command-line usage
 
 ```bash
-rlc /path/to/song.mp3     # play a single file directly with ffplay
+rlc /path/to/song.mp3     # open rlc and auto-play this track (with visualizer)
 rlc /path/to/music_dir    # open rlc using this directory for this run
 rlc --music-dir ~/Music   # scan and load tracks from a specific directory
 rlc --fps 30              # set UI render rate

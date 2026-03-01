@@ -32,7 +32,10 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     stdscr.timeout(max(1, int(1000 / max(1, config.fps))))
 
     state = AppState()
-    tracks = scan_music_files(config.music_dir)
+    if config.startup_track and config.startup_track.exists() and config.startup_track.is_file():
+        tracks = [config.startup_track]
+    else:
+        tracks = scan_music_files(config.music_dir)
     player = FFplayBackend()
     analyzer = FFMpegSpectrumAnalyzer(bands=len(state.playback.spectrum_levels))
     download_results: queue.Queue[tuple[bool, str]] = queue.Queue()
@@ -47,10 +50,25 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
         state.ui.status_line = (
             f"Loaded {len(tracks)} tracks. ffmpeg not found, visualizer disabled."
         )
+    elif config.startup_track:
+        state.ui.status_line = f"Startup track: {config.startup_track.name}"
     else:
         state.ui.status_line = (
             f"Loaded {len(tracks)} tracks. l=play space=pause dd=delete :=name.mp3 <url>"
         )
+
+    if config.startup_track and tracks and player.available():
+        try:
+            track = tracks[0]
+            player.play(track)
+            analyzer.start(track)
+            state.playback.now_playing = track.name
+            state.playback.is_playing = True
+            state.playback.is_paused = False
+            state.ui.selected_index = 0
+            state.ui.status_line = f"Playing: {track.name}"
+        except Exception as exc:  # pragma: no cover
+            state.ui.status_line = f"Playback error: {exc}"
 
     last_frame = 0.0
     frame_interval = 1.0 / max(1, config.fps)
@@ -59,13 +77,25 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
         while not state.ui.should_quit:
             should_rescan = _process_download_events(state, download_results)
             if should_rescan:
-                tracks = scan_music_files(config.music_dir)
+                tracks = (
+                    [config.startup_track]
+                    if config.startup_track
+                    and config.startup_track.exists()
+                    and config.startup_track.is_file()
+                    else scan_music_files(config.music_dir)
+                )
                 _clamp_selection(state, tracks)
                 _recompute_search_results(state, tracks)
             if download_thread and not download_thread.is_alive():
                 download_thread = None
             if state.ui.download_in_progress:
-                updated_tracks = scan_music_files(config.music_dir)
+                updated_tracks = (
+                    [config.startup_track]
+                    if config.startup_track
+                    and config.startup_track.exists()
+                    and config.startup_track.is_file()
+                    else scan_music_files(config.music_dir)
+                )
                 if len(updated_tracks) != len(tracks):
                     tracks = updated_tracks
                     _clamp_selection(state, tracks)

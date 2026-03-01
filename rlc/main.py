@@ -52,13 +52,15 @@ def main() -> int:
         return _upgrade_to_latest()
 
     target_music_dir: str | None = None
+    startup_track: Path | None = None
     if args.target:
         target_path = Path(args.target).expanduser().resolve()
         if target_path.is_file():
-            return _play_single_file(target_path)
+            startup_track = target_path
+            target_music_dir = str(target_path.parent)
         if target_path.is_dir():
             target_music_dir = str(target_path)
-        else:
+        elif startup_track is None:
             print(f"Path not found: {target_path}", file=sys.stderr)
             return 1
 
@@ -66,8 +68,11 @@ def main() -> int:
     if args.config:
         config_path = Path(args.config).expanduser().resolve()
 
-    # Persist explicit --music-dir for first-time users, but not temporary dir-path mode.
-    _bootstrap_first_run_config(config_path=config_path, cli_music_dir=args.music_dir)
+    # Persist explicit --music-dir for first-time users, but not temporary target-path mode.
+    if args.music_dir:
+        _bootstrap_first_run_config(config_path=config_path, cli_music_dir=args.music_dir)
+    elif not args.target:
+        _bootstrap_first_run_config(config_path=config_path, cli_music_dir=None)
 
     effective_music_dir = args.music_dir or target_music_dir
 
@@ -76,6 +81,7 @@ def main() -> int:
         cli_fps=args.fps,
         config_path=config_path,
     )
+    config.startup_track = startup_track
     return run_app(config)
 
 
@@ -102,16 +108,6 @@ def _bootstrap_first_run_config(*, config_path: Path, cli_music_dir: str | None)
     chosen = raw or default_dir
     resolved = str(Path(chosen).expanduser().resolve())
     save_user_config(config_path, music_dir=resolved)
-
-
-def _play_single_file(track_path: Path) -> int:
-    ffplay = shutil.which("ffplay")
-    if not ffplay:
-        print("ffplay not found in PATH. Install ffmpeg package.", file=sys.stderr)
-        return 1
-
-    proc = subprocess.run([ffplay, "-nodisp", "-autoexit", str(track_path)])
-    return proc.returncode
 
 
 def _upgrade_to_latest() -> int:

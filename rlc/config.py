@@ -10,6 +10,7 @@ from pathlib import Path
 class AppConfig:
     music_dir: Path
     fps: int = 20
+    startup_track: Path | None = None
 
 
 @dataclass(slots=True)
