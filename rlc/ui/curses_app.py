@@ -32,7 +32,8 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     curses.curs_set(0)
     init_theme(stdscr)
     stdscr.nodelay(True)
-    stdscr.timeout(max(1, int(1000 / max(1, config.fps))))
+    input_timeout_ms = max(1, int(1000 / max(1, config.fps)))
+    stdscr.timeout(input_timeout_ms)
 
     state = AppState()
     if config.startup_track and config.startup_track.exists() and config.startup_track.is_file():
@@ -64,6 +65,7 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
 
     last_frame = 0.0
     frame_interval = 1.0 / max(1, config.fps)
+    last_cursor_mode = False
 
     try:
         while not state.ui.should_quit:
@@ -97,6 +99,8 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
             key = stdscr.getch()
             if key != -1:
                 if state.ui.command_mode:
+                    if key == 27:
+                        key = _read_alt_key(stdscr, input_timeout_ms)
                     download_thread = _handle_command_key(
                         key,
                         state,
@@ -148,6 +152,12 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
 
             now = time.monotonic()
             if now - last_frame >= frame_interval:
+                if state.ui.command_mode != last_cursor_mode:
+                    try:
+                        curses.curs_set(1 if state.ui.command_mode else 0)
+                    except curses.error:
+                        pass
+                    last_cursor_mode = state.ui.command_mode
                 render(stdscr, state, tracks)
                 last_frame = now
     finally:
@@ -173,6 +183,7 @@ def _handle_key(
         state.ui.command_mode = False
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
         state.ui.status_line = "Shortcuts" if state.ui.show_shortcuts else "Ready"
         return
 
@@ -213,12 +224,14 @@ def _handle_key(
         state.ui.command_mode = True
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
         return
 
     if action.name == "search_mode":
         state.ui.command_mode = True
         state.ui.command_prefix = "/"
         state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
         return
 
     if action.name == "stop":
@@ -303,6 +316,7 @@ def _handle_command_key(
         state.ui.command_mode = False
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
         state.ui.status_line = "Command cancelled"
         return download_thread
 
@@ -312,6 +326,7 @@ def _handle_command_key(
         state.ui.command_mode = False
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
         if not command:
             state.ui.status_line = "Command cancelled"
             return download_thread
@@ -344,13 +359,61 @@ def _handle_command_key(
         return thread
 
     if key in (curses.KEY_BACKSPACE, 127, 8):
-        state.ui.command_buffer = state.ui.command_buffer[:-1]
+        if state.ui.command_cursor > 0:
+            cur = state.ui.command_cursor
+            state.ui.command_buffer = (
+                state.ui.command_buffer[: cur - 1] + state.ui.command_buffer[cur:]
+            )
+            state.ui.command_cursor -= 1
+        return download_thread
+
+    if key == curses.KEY_DC:
+        cur = state.ui.command_cursor
+        if cur < len(state.ui.command_buffer):
+            state.ui.command_buffer = (
+                state.ui.command_buffer[:cur] + state.ui.command_buffer[cur + 1 :]
+            )
+        return download_thread
+
+    if key in (curses.KEY_LEFT,):
+        state.ui.command_cursor = max(0, state.ui.command_cursor - 1)
+        return download_thread
+
+    if key in (curses.KEY_RIGHT,):
+        state.ui.command_cursor = min(
+            len(state.ui.command_buffer), state.ui.command_cursor + 1
+        )
+        return download_thread
+
+    if key in (curses.KEY_HOME, 1):  # Home / Ctrl+A
+        state.ui.command_cursor = 0
+        return download_thread
+
+    if key in (curses.KEY_END, 5):  # End / Ctrl+E
+        state.ui.command_cursor = len(state.ui.command_buffer)
+        return download_thread
+
+    if key == 23:  # Ctrl+W
+        _delete_prev_word(state)
+        return download_thread
+
+    if key == 1002:  # Alt+b
+        _move_prev_word(state)
+        return download_thread
+
+    if key == 1006:  # Alt+f
+        _move_next_word(state)
         return download_thread
 
     if 32 <= key <= 126:
-        state.ui.command_buffer += chr(key)
+        cur = state.ui.command_cursor
+        state.ui.command_buffer = (
+            state.ui.command_buffer[:cur] + chr(key) + state.ui.command_buffer[cur:]
+        )
+        state.ui.command_cursor += 1
         if len(state.ui.command_buffer) > 2048:
             state.ui.command_buffer = state.ui.command_buffer[:2048]
+            state.ui.command_cursor = min(state.ui.command_cursor, 2048)
 
     return download_thread
 
@@ -593,3 +656,53 @@ def _seek_status_text(prefix: str, position: float, duration: float | None) -> s
         pct = int(round(min(100.0, max(0.0, (position / duration) * 100.0))))
         return f"{prefix}: {pct}%"
     return f"{prefix}: --%"
+
+
+def _read_alt_key(stdscr: curses.window, restore_timeout_ms: int) -> int:
+    stdscr.timeout(30)
+    try:
+        nxt = stdscr.getch()
+    finally:
+        stdscr.timeout(restore_timeout_ms)
+    if nxt == -1:
+        return 27
+    if nxt == ord("b"):
+        return 1002
+    if nxt == ord("f"):
+        return 1006
+    return nxt
+
+
+def _delete_prev_word(state: AppState) -> None:
+    s = state.ui.command_buffer
+    cur = state.ui.command_cursor
+    if cur <= 0:
+        return
+    i = cur
+    while i > 0 and s[i - 1].isspace():
+        i -= 1
+    while i > 0 and not s[i - 1].isspace():
+        i -= 1
+    state.ui.command_buffer = s[:i] + s[cur:]
+    state.ui.command_cursor = i
+
+
+def _move_prev_word(state: AppState) -> None:
+    s = state.ui.command_buffer
+    i = state.ui.command_cursor
+    while i > 0 and s[i - 1].isspace():
+        i -= 1
+    while i > 0 and not s[i - 1].isspace():
+        i -= 1
+    state.ui.command_cursor = i
+
+
+def _move_next_word(state: AppState) -> None:
+    s = state.ui.command_buffer
+    i = state.ui.command_cursor
+    n = len(s)
+    while i < n and not s[i].isspace():
+        i += 1
+    while i < n and s[i].isspace():
+        i += 1
+    state.ui.command_cursor = i

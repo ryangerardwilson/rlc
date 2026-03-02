@@ -86,6 +86,11 @@ Command bar actions:
 - `:name.mp3 https://...` - download YouTube audio into music directory
 - `/query` - startswith, then contains, then fuzzy fallback
 
+Command-bar editing:
+- Arrow keys - move cursor left/right
+- `Ctrl+W` - delete previous word
+- `Alt+b` / `Alt+f` - move cursor backward/forward by word
+
 Playback behavior:
 - By default, when a track ends, `rlc` plays the next track in the current library order.
 

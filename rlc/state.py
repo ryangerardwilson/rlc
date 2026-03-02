@@ -13,6 +13,7 @@ class UIState:
     command_mode: bool = False
     command_prefix: str = ":"
     command_buffer: str = ""
+    command_cursor: int = 0
     download_in_progress: bool = False
     search_query: str = ""
     search_results: list[int] = field(default_factory=list)

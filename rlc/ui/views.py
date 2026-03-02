@@ -132,6 +132,7 @@ def render(
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
+        _place_command_cursor(stdscr, h - 1, state)
     else:
         _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
         if tracks:
@@ -198,6 +199,7 @@ def _render_single_track(
     if state.ui.command_mode:
         prompt = state.ui.command_prefix + state.ui.command_buffer
         _safe_addstr(stdscr, h - 1, 0, prompt, attr_bright())
+        _place_command_cursor(stdscr, h - 1, state)
     else:
         _safe_addstr(stdscr, h - 1, 0, state.ui.status_line, attr_base())
 
@@ -279,3 +281,15 @@ def _fmt_time(value: float | None) -> str:
     if hours > 0:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def _place_command_cursor(stdscr: curses.window, y: int, state: AppState) -> None:
+    max_y, max_x = stdscr.getmaxyx()
+    if y < 0 or y >= max_y or max_x <= 0:
+        return
+    x = len(state.ui.command_prefix) + state.ui.command_cursor
+    x = min(max(0, x), max_x - 1)
+    try:
+        stdscr.move(y, x)
+    except curses.error:
+        return
