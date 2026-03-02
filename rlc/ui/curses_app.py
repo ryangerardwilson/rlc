@@ -239,6 +239,10 @@ def _handle_key(
     if action.name == "toggle_pause":
         state.ui.pending_seek_delta = 0.0
         state.ui.pending_seek_deadline = 0.0
+        now = time.monotonic()
+        if now - state.ui.last_pause_toggle_at < 0.15:
+            return
+        state.ui.last_pause_toggle_at = now
         if not state.playback.is_playing:
             state.ui.status_line = "Nothing is playing"
             return

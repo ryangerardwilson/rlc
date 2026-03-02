@@ -57,12 +57,8 @@ class FFplayBackend(PlayerBackend):
         if not self.is_playing() or not self._proc:
             return False
         if self._paused:
-            sig = signal.SIGCONT
-        else:
-            sig = signal.SIGSTOP
-        os.kill(self._proc.pid, sig)
-        if self._paused:
             # Resume: continue from frozen position.
+            os.kill(self._proc.pid, signal.SIGCONT)
             if self._paused_position is not None:
                 self._position_offset = self._paused_position
             self._started_at = time.monotonic()
@@ -71,6 +67,7 @@ class FFplayBackend(PlayerBackend):
         else:
             # Pause: freeze current position.
             self._paused_position = self.current_position()
+            os.kill(self._proc.pid, signal.SIGSTOP)
             self._paused = True
         return self._paused
 

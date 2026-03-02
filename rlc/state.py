@@ -21,6 +21,7 @@ class UIState:
     search_mode_label: str = "Search"
     pending_seek_delta: float = 0.0
     pending_seek_deadline: float = 0.0
+    last_pause_toggle_at: float = 0.0
 
 
 @dataclass(slots=True)
