@@ -15,3 +15,15 @@ def scan_music_files(root: Path) -> list[Path]:
     ]
     tracks.sort(key=lambda p: p.name.lower())
     return tracks
+
+
+def list_playlists(root: Path) -> list[Path]:
+    if not root.exists() or not root.is_dir():
+        return []
+    playlists = [path for path in root.iterdir() if path.is_dir()]
+    playlists.sort(key=lambda p: p.name.lower())
+    return playlists
+
+
+def scan_playlist_tracks(playlist_dir: Path) -> list[Path]:
+    return scan_music_files(playlist_dir)

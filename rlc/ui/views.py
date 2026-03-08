@@ -61,13 +61,20 @@ def render(
     left_w = min(left_w, w - 20)
     right_w = w - left_w
 
+    library_title = "Library"
+    if not state.ui.single_track_mode:
+        if state.ui.in_playlist_view and state.ui.current_dir is not None:
+            library_title = f"Playlist: {state.ui.current_dir.name}"
+        else:
+            library_title = "Playlists"
+
     draw_box(
         stdscr,
         0,
         0,
         h - 2,
         left_w,
-        "Library",
+        library_title,
         border_attr=attr_dim(),
         title_attr=attr_bright(),
     )
@@ -90,7 +97,10 @@ def render(
     for i, track in enumerate(visible_tracks):
         idx = start + i
         marker = ">" if idx == state.ui.selected_index else " "
-        line = f"{marker} {display_name(track)}"
+        name = display_name(track)
+        if not state.ui.single_track_mode and not state.ui.in_playlist_view:
+            name = f"{name}/"
+        line = f"{marker} {name}"
         attr = attr_selected() if idx == state.ui.selected_index else attr_base()
         _safe_addstr(stdscr, list_y + i, 1, line, attr)
 
@@ -216,23 +226,36 @@ def _render_shortcuts(stdscr: curses.window, h: int, w: int) -> None:
         title_attr=attr_bright(),
     )
     lines = [
-        "Navigation: j/k",
-        "Play selected: l",
-        "Pause/resume: Space",
-        "Seek forward/back: f / b",
-        "Stop: x",
-        "Delete selected track: dd",
-        "Shuffle playlist: s",
-        "Move track down/up: Ctrl+j / Ctrl+k",
-        "Command bar: :",
-        "Search prompt: /",
-        "Search next/prev: n / N",
-        "Toggle shortcuts: ?",
-        "Quit: q",
+        "Movement",
+        "  j/k                  move up/down",
+        "  l                    open playlist / play track",
+        "  h                    back to playlists",
         "",
-        "Command bar:",
-        "  :name.mp3 <youtube-url>  download to music dir",
-        "  /query                   startswith > contains > fuzzy",
+        "Playback",
+        "  Space                pause/resume",
+        "  f / b                seek forward/back",
+        "  x                    stop",
+        "  s                    shuffle tracks (playlist view)",
+        "  Ctrl+j / Ctrl+k      move track down/up",
+        "",
+        "Library",
+        "  n                    new playlist (root) / YouTube download (playlist)",
+        "  ,rn                  rename selected playlist (root)",
+        "  dd                   delete selected (playlist at root, track in playlist)",
+        "",
+        "Search",
+        "  /query               startswith > contains > fuzzy",
+        "  n / N                next / previous result (while search is active)",
+        "",
+        "Prompts",
+        "  n                    :name> <new_playlist_name>",
+        "  n (playlist)         :ytd_cmd> <name.mp3> <youtube-url>",
+        "  ,rn                  :name> <editable_old_name>",
+        "",
+        "General",
+        "  ?                    toggle shortcuts",
+        "  q                    quit",
+        "",
     ]
 
     y = 2

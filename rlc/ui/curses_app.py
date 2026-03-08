@@ -4,6 +4,7 @@ import curses
 import difflib
 import queue
 import random
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -14,7 +15,8 @@ from rlc.library import (
     duration_seconds,
     download_youtube_audio,
     is_supported_youtube_url,
-    scan_music_files,
+    list_playlists,
+    scan_playlist_tracks,
 )
 from rlc.player.ffplay_backend import FFplayBackend
 from rlc.state import AppState
@@ -29,6 +31,12 @@ def run_curses_app(config: AppConfig) -> int:
 
 
 def _run(stdscr: curses.window, config: AppConfig) -> int:
+    # Make bare Esc responsive in terminals that otherwise wait too long for
+    # possible escape sequences.
+    try:
+        curses.set_escdelay(25)
+    except (AttributeError, curses.error):
+        pass
     curses.curs_set(0)
     init_theme(stdscr)
     stdscr.nodelay(True)
@@ -36,11 +44,13 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     stdscr.timeout(input_timeout_ms)
 
     state = AppState()
+    state.ui.playlists_root = config.music_dir
+    state.ui.current_dir = config.music_dir
     if config.startup_track and config.startup_track.exists() and config.startup_track.is_file():
         tracks = [config.startup_track]
         state.ui.single_track_mode = True
     else:
-        tracks = scan_music_files(config.music_dir)
+        tracks = list_playlists(config.music_dir)
     player = FFplayBackend()
     analyzer = FFMpegSpectrumAnalyzer(bands=len(state.playback.spectrum_levels))
     download_results: queue.Queue[tuple[bool, str]] = queue.Queue()
@@ -48,17 +58,22 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
     last_d_time = 0.0
 
     if not tracks:
-        state.ui.status_line = f"No tracks found in {config.music_dir}. Press q to quit."
+        if state.ui.single_track_mode:
+            state.ui.status_line = f"No tracks found in {config.music_dir}. Press q to quit."
+        else:
+            state.ui.status_line = (
+                f"No playlists found in {config.music_dir}. Press , then name to create one."
+            )
     elif not player.available():
         state.ui.status_line = "ffplay not found in PATH. Install ffmpeg package."
     elif not analyzer.available():
         state.ui.status_line = (
-            f"Loaded {len(tracks)} tracks. ffmpeg not found, visualizer disabled."
+            f"Loaded {len(tracks)} items. ffmpeg not found, visualizer disabled."
         )
     elif config.startup_track:
         state.ui.status_line = f"Startup track: {config.startup_track.name}"
     else:
-        state.ui.status_line = f"Loaded {len(tracks)} tracks. ? for shortcuts"
+        state.ui.status_line = f"Loaded {len(tracks)} playlists. ? for shortcuts"
 
     if config.startup_track and tracks and player.available():
         _play_index(0, state, tracks, player, analyzer)
@@ -72,25 +87,13 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
             _flush_pending_seek(state, tracks, player, analyzer)
             should_rescan = _process_download_events(state, download_results)
             if should_rescan:
-                tracks = (
-                    [config.startup_track]
-                    if config.startup_track
-                    and config.startup_track.exists()
-                    and config.startup_track.is_file()
-                    else scan_music_files(config.music_dir)
-                )
+                tracks = _reload_entries(state, config.startup_track)
                 _clamp_selection(state, tracks)
                 _recompute_search_results(state, tracks)
             if download_thread and not download_thread.is_alive():
                 download_thread = None
             if state.ui.download_in_progress:
-                updated_tracks = (
-                    [config.startup_track]
-                    if config.startup_track
-                    and config.startup_track.exists()
-                    and config.startup_track.is_file()
-                    else scan_music_files(config.music_dir)
-                )
+                updated_tracks = _reload_entries(state, config.startup_track)
                 if len(updated_tracks) != len(tracks):
                     tracks = updated_tracks
                     _clamp_selection(state, tracks)
@@ -105,7 +108,6 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
                         key,
                         state,
                         tracks,
-                        config.music_dir,
                         download_thread,
                         download_results,
                     )
@@ -113,11 +115,16 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
                     if key == ord("d"):
                         now = time.monotonic()
                         if now - last_d_time <= 0.6:
-                            tracks = _delete_selected_track(state, tracks, config.music_dir)
+                            tracks = _delete_selected_entry(state, tracks)
                             _recompute_search_results(state, tracks)
                             last_d_time = 0.0
                         else:
-                            state.ui.status_line = "Press d again quickly to delete track"
+                            if state.ui.in_playlist_view or state.ui.single_track_mode:
+                                state.ui.status_line = "Press d again quickly to delete track"
+                            else:
+                                state.ui.status_line = (
+                                    "Press d again quickly to delete playlist"
+                                )
                             last_d_time = now
                         continue
                     _handle_key(key, state, tracks, player, analyzer)
@@ -139,7 +146,7 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
                     state.playback.is_paused = False
                     state.playback.elapsed_seconds = 0.0
                     state.playback.duration_seconds = None
-                elif tracks and len(tracks) > 1:
+                elif _can_play_entries(state) and tracks and len(tracks) > 1:
                     next_index = (state.ui.selected_index + 1) % len(tracks)
                     _play_index(next_index, state, tracks, player, analyzer)
                 else:
@@ -174,24 +181,36 @@ def _handle_key(
     player: FFplayBackend,
     analyzer: FFMpegSpectrumAnalyzer,
 ) -> None:
+    if key == 27 and state.ui.search_query:
+        _clear_search_state(state)
+        state.ui.status_line = "Search cleared"
+        return
+
+    if (
+        key == ord("n")
+        and state.ui.search_query
+        and state.ui.search_results
+        and not state.ui.command_mode
+    ):
+        if _jump_search_result(state, step=1):
+            state.ui.status_line = _search_status(state)
+        return
+
     action = KEY_ACTIONS.get(key)
     if not action:
         return
 
     if action.name == "toggle_help":
         state.ui.show_shortcuts = not state.ui.show_shortcuts
-        state.ui.command_mode = False
-        state.ui.command_prefix = ":"
-        state.ui.command_buffer = ""
-        state.ui.command_cursor = 0
+        _reset_command_input(state)
         state.ui.status_line = "Shortcuts" if state.ui.show_shortcuts else "Ready"
-        return
-
-    if state.ui.show_shortcuts:
         return
 
     if action.name == "quit":
         state.ui.should_quit = True
+        return
+
+    if state.ui.show_shortcuts:
         return
 
     if action.name == "down" and tracks:
@@ -203,6 +222,9 @@ def _handle_key(
         return
 
     if action.name == "move_item_down" and tracks:
+        if not _can_play_entries(state):
+            state.ui.status_line = "Open a playlist to reorder tracks"
+            return
         i = state.ui.selected_index
         if i < len(tracks) - 1:
             tracks[i], tracks[i + 1] = tracks[i + 1], tracks[i]
@@ -212,6 +234,9 @@ def _handle_key(
         return
 
     if action.name == "move_item_up" and tracks:
+        if not _can_play_entries(state):
+            state.ui.status_line = "Open a playlist to reorder tracks"
+            return
         i = state.ui.selected_index
         if i > 0:
             tracks[i], tracks[i - 1] = tracks[i - 1], tracks[i]
@@ -225,6 +250,28 @@ def _handle_key(
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
         state.ui.command_cursor = 0
+        state.ui.command_intent = None
+        return
+
+    if action.name == "leader_mode":
+        if state.ui.single_track_mode:
+            state.ui.status_line = "Leader commands unavailable in single-track mode"
+            return
+        state.ui.command_mode = True
+        state.ui.command_prefix = ","
+        state.ui.command_buffer = ""
+        state.ui.command_cursor = 0
+        state.ui.command_intent = "leader"
+        return
+
+    if action.name == "new_playlist_mode":
+        if state.ui.single_track_mode:
+            state.ui.status_line = "Playlist creation not available in single-track mode"
+            return
+        if state.ui.in_playlist_view:
+            _open_ytd_prompt(state)
+            return
+        _open_new_playlist_prompt(state)
         return
 
     if action.name == "search_mode":
@@ -232,6 +279,7 @@ def _handle_key(
         state.ui.command_prefix = "/"
         state.ui.command_buffer = ""
         state.ui.command_cursor = 0
+        state.ui.command_intent = None
         return
 
     if action.name == "stop":
@@ -284,6 +332,9 @@ def _handle_key(
         return
 
     if action.name == "shuffle_playlist":
+        if not _can_play_entries(state):
+            state.ui.status_line = "Open a playlist to shuffle tracks"
+            return
         if state.ui.single_track_mode:
             state.ui.status_line = "Single track mode: nothing to shuffle"
             return
@@ -298,9 +349,44 @@ def _handle_key(
         return
 
     if action.name == "play_selected":
+        if not state.ui.single_track_mode and not state.ui.in_playlist_view:
+            if not tracks:
+                state.ui.status_line = "No playlists available"
+                return
+            playlist = tracks[state.ui.selected_index]
+            state.ui.current_dir = playlist
+            state.ui.in_playlist_view = True
+            state.ui.selected_index = 0
+            _clear_search_state(state)
+            updated = scan_playlist_tracks(playlist)
+            tracks.clear()
+            tracks.extend(updated)
+            state.ui.status_line = f"Opened playlist: {playlist.name}"
+            return
         state.ui.pending_seek_delta = 0.0
         state.ui.pending_seek_deadline = 0.0
         _play_index(state.ui.selected_index, state, tracks, player, analyzer)
+        return
+
+    if action.name == "go_parent":
+        if state.ui.single_track_mode:
+            state.ui.status_line = "Already at top level"
+            return
+        if not state.ui.in_playlist_view:
+            state.ui.status_line = "Already at playlists root"
+            return
+        previous = state.ui.current_dir
+        state.ui.in_playlist_view = False
+        state.ui.current_dir = state.ui.playlists_root
+        _clear_search_state(state)
+        updated = list_playlists(state.ui.playlists_root or Path("."))
+        tracks.clear()
+        tracks.extend(updated)
+        if previous in updated:
+            state.ui.selected_index = updated.index(previous)
+        else:
+            state.ui.selected_index = 0
+        state.ui.status_line = "Playlists"
         return
 
 
@@ -308,25 +394,28 @@ def _handle_command_key(
     key: int,
     state: AppState,
     tracks: list[Path],
-    music_dir: Path,
     download_thread: threading.Thread | None,
     download_results: queue.Queue[tuple[bool, str]],
 ) -> threading.Thread | None:
     if key in (27,):  # Esc
-        state.ui.command_mode = False
-        state.ui.command_prefix = ":"
-        state.ui.command_buffer = ""
-        state.ui.command_cursor = 0
-        state.ui.status_line = "Command cancelled"
+        if state.ui.command_prefix == "/":
+            _clear_search_state(state)
+            state.ui.status_line = "Search cleared"
+        else:
+            state.ui.status_line = "Command cancelled"
+        _reset_command_input(state)
         return download_thread
 
     if key in (10, 13):  # Enter
         command = state.ui.command_buffer.strip()
         prefix = state.ui.command_prefix
+        intent = state.ui.command_intent
+        was_command_active = state.ui.command_mode
         state.ui.command_mode = False
         state.ui.command_prefix = ":"
         state.ui.command_buffer = ""
         state.ui.command_cursor = 0
+        state.ui.command_intent = None
         if not command:
             state.ui.status_line = "Command cancelled"
             return download_thread
@@ -335,28 +424,80 @@ def _handle_command_key(
             _run_search_command(state, tracks, command)
             return download_thread
 
-        if download_thread and download_thread.is_alive():
-            state.ui.status_line = "Download already in progress"
+        if prefix == ":name> " and intent == "new_playlist":
+            root = state.ui.playlists_root
+            if root is None:
+                state.ui.status_line = "No playlists root configured"
+                return download_thread
+            ok, message, created = _create_playlist(root, command)
+            state.ui.status_line = message
+            if ok:
+                updated = list_playlists(root)
+                tracks.clear()
+                tracks.extend(updated)
+                if created in updated:
+                    state.ui.selected_index = updated.index(created)
+                else:
+                    _clamp_selection(state, tracks)
+                _clear_search_state(state)
             return download_thread
 
-        parsed = _parse_download_command(command)
-        if not parsed:
-            state.ui.status_line = "Use: :name.mp3 <youtube-url>"
-            return download_thread
-        target_name, url = parsed
-        if not is_supported_youtube_url(url):
-            state.ui.status_line = "Command expects a YouTube URL"
+        if prefix == ":name> " and intent == "rename_playlist":
+            ok, message, renamed = _rename_selected_playlist(state, tracks, command)
+            state.ui.status_line = message
+            if ok:
+                root = state.ui.playlists_root
+                if root is not None:
+                    updated = list_playlists(root)
+                    tracks.clear()
+                    tracks.extend(updated)
+                    if renamed in updated:
+                        state.ui.selected_index = updated.index(renamed)
+                    else:
+                        _clamp_selection(state, tracks)
+                    _clear_search_state(state)
             return download_thread
 
-        state.ui.download_in_progress = True
-        state.ui.status_line = f"Downloading {target_name}..."
-        thread = threading.Thread(
-            target=_download_worker,
-            args=(target_name, url, music_dir, download_results),
-            daemon=True,
-        )
-        thread.start()
-        return thread
+        if prefix == ",":
+            if command == "rn":
+                if _open_rename_prompt(state, tracks):
+                    return download_thread
+                return download_thread
+            state.ui.status_line = "Unknown leader command. Use ,rn"
+            return download_thread
+
+        if prefix == ":ytd_cmd> " and intent == "youtube_download":
+            if download_thread and download_thread.is_alive():
+                state.ui.status_line = "Download already in progress"
+                return download_thread
+
+            output_dir = _current_download_dir(state)
+            if output_dir is None:
+                state.ui.status_line = "Open a playlist first (l), then download"
+                return download_thread
+
+            parsed = _parse_download_command(command)
+            if not parsed:
+                state.ui.status_line = "Use: name.mp3 <youtube-url>"
+                return download_thread
+            target_name, url = parsed
+            if not is_supported_youtube_url(url):
+                state.ui.status_line = "Command expects a YouTube URL"
+                return download_thread
+
+            state.ui.download_in_progress = True
+            state.ui.status_line = f"Downloading {target_name}..."
+            thread = threading.Thread(
+                target=_download_worker,
+                args=(target_name, url, output_dir, download_results),
+                daemon=True,
+            )
+            thread.start()
+            return thread
+
+        if prefix == ":" and was_command_active:
+            state.ui.status_line = "No ':' command implemented yet"
+            return download_thread
 
     if key in (curses.KEY_BACKSPACE, 127, 8):
         if state.ui.command_cursor > 0:
@@ -411,6 +552,9 @@ def _handle_command_key(
             state.ui.command_buffer[:cur] + chr(key) + state.ui.command_buffer[cur:]
         )
         state.ui.command_cursor += 1
+        if state.ui.command_prefix == "," and state.ui.command_buffer == "rn":
+            _open_rename_prompt(state, tracks)
+            return download_thread
         if len(state.ui.command_buffer) > 2048:
             state.ui.command_buffer = state.ui.command_buffer[:2048]
             state.ui.command_cursor = min(state.ui.command_cursor, 2048)
@@ -437,10 +581,10 @@ def _parse_download_command(command: str) -> tuple[str, str] | None:
 def _download_worker(
     target_name: str,
     url: str,
-    music_dir: Path,
+    output_dir: Path,
     output: queue.Queue[tuple[bool, str]],
 ) -> None:
-    ok, message = download_youtube_audio(url, music_dir, target_name)
+    ok, message = download_youtube_audio(url, output_dir, target_name)
     output.put((ok, message))
 
 
@@ -515,7 +659,7 @@ def _search_status(state: AppState) -> str:
     total = len(state.ui.search_results)
     idx = state.ui.search_cursor + 1 if state.ui.search_cursor >= 0 else 0
     mode = state.ui.search_mode_label
-    return f"{mode} '{state.ui.search_query}': {idx}/{total} (n/p)"
+    return f"{mode} '{state.ui.search_query}': {idx}/{total} (n/N)"
 
 
 def _recompute_search_results(state: AppState, tracks: list[Path]) -> None:
@@ -559,8 +703,10 @@ def _is_subsequence(needle: str, haystack: str) -> bool:
 def _delete_selected_track(
     state: AppState,
     tracks: list[Path],
-    music_dir: Path,
 ) -> list[Path]:
+    if not _can_play_entries(state):
+        state.ui.status_line = "Open a playlist to delete tracks"
+        return tracks
     if not tracks:
         state.ui.status_line = "No track selected"
         return tracks
@@ -572,7 +718,11 @@ def _delete_selected_track(
         state.ui.status_line = f"Delete failed: {exc}"
         return tracks
 
-    updated = scan_music_files(music_dir)
+    current_dir = state.ui.current_dir
+    if current_dir is None:
+        state.ui.status_line = "No playlist selected"
+        return tracks
+    updated = scan_playlist_tracks(current_dir)
     if updated:
         state.ui.selected_index = min(state.ui.selected_index, len(updated) - 1)
     else:
@@ -581,11 +731,186 @@ def _delete_selected_track(
     return updated
 
 
+def _delete_selected_entry(state: AppState, tracks: list[Path]) -> list[Path]:
+    if state.ui.in_playlist_view or state.ui.single_track_mode:
+        return _delete_selected_track(state, tracks)
+    return _delete_selected_playlist(state, tracks)
+
+
+def _delete_selected_playlist(
+    state: AppState,
+    playlists: list[Path],
+) -> list[Path]:
+    root = state.ui.playlists_root
+    if root is None:
+        state.ui.status_line = "No playlists root configured"
+        return playlists
+    if not playlists:
+        state.ui.status_line = "No playlist selected"
+        return playlists
+
+    playlist = playlists[state.ui.selected_index]
+    try:
+        shutil.rmtree(playlist)
+    except OSError as exc:
+        state.ui.status_line = f"Delete failed: {exc}"
+        return playlists
+
+    updated = list_playlists(root)
+    if updated:
+        state.ui.selected_index = min(state.ui.selected_index, len(updated) - 1)
+    else:
+        state.ui.selected_index = 0
+    state.ui.status_line = f"Deleted playlist: {playlist.name}"
+    return updated
+
+
 def _clamp_selection(state: AppState, tracks: list[Path]) -> None:
     if not tracks:
         state.ui.selected_index = 0
         return
     state.ui.selected_index = min(state.ui.selected_index, len(tracks) - 1)
+
+
+def _reload_entries(state: AppState, startup_track: Path | None) -> list[Path]:
+    if startup_track and startup_track.exists() and startup_track.is_file():
+        return [startup_track]
+
+    if state.ui.in_playlist_view:
+        current_dir = state.ui.current_dir
+        if current_dir is None:
+            return []
+        return scan_playlist_tracks(current_dir)
+
+    root = state.ui.playlists_root
+    if root is None:
+        return []
+    return list_playlists(root)
+
+
+def _clear_search_state(state: AppState) -> None:
+    state.ui.search_query = ""
+    state.ui.search_results = []
+    state.ui.search_cursor = -1
+    state.ui.search_is_fuzzy = False
+    state.ui.search_mode_label = "Search"
+
+
+def _can_play_entries(state: AppState) -> bool:
+    return state.ui.single_track_mode or state.ui.in_playlist_view
+
+
+def _current_download_dir(state: AppState) -> Path | None:
+    if state.ui.single_track_mode:
+        return state.ui.playlists_root
+    if not state.ui.in_playlist_view:
+        return None
+    return state.ui.current_dir
+
+
+def _reset_command_input(state: AppState) -> None:
+    state.ui.command_mode = False
+    state.ui.command_prefix = ":"
+    state.ui.command_buffer = ""
+    state.ui.command_cursor = 0
+    state.ui.command_intent = None
+
+
+def _open_new_playlist_prompt(state: AppState) -> None:
+    state.ui.command_mode = True
+    state.ui.command_prefix = ":name> "
+    state.ui.command_buffer = ""
+    state.ui.command_cursor = 0
+    state.ui.command_intent = "new_playlist"
+
+
+def _open_ytd_prompt(state: AppState) -> None:
+    state.ui.command_mode = True
+    state.ui.command_prefix = ":ytd_cmd> "
+    state.ui.command_buffer = ""
+    state.ui.command_cursor = 0
+    state.ui.command_intent = "youtube_download"
+
+
+def _open_rename_prompt(state: AppState, playlists: list[Path]) -> bool:
+    if state.ui.in_playlist_view:
+        _reset_command_input(state)
+        state.ui.status_line = "Go to playlists root (h) to rename a playlist"
+        return False
+    if not playlists:
+        _reset_command_input(state)
+        state.ui.status_line = "No playlist selected"
+        return False
+    selected = playlists[state.ui.selected_index]
+    state.ui.command_mode = True
+    state.ui.command_prefix = ":name> "
+    state.ui.command_buffer = selected.name
+    state.ui.command_cursor = len(state.ui.command_buffer)
+    state.ui.command_intent = "rename_playlist"
+    return True
+
+
+def _create_playlist(root: Path, raw_name: str) -> tuple[bool, str, Path | None]:
+    name = _normalize_playlist_name(raw_name)
+    if not name:
+        return False, "Invalid playlist name", None
+
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, f"Cannot access playlists root: {exc}", None
+
+    playlist_dir = root / name
+    if playlist_dir.exists():
+        if playlist_dir.is_dir():
+            return False, f"Playlist already exists: {name}", None
+        return False, f"Cannot create playlist, file exists: {name}", None
+
+    try:
+        playlist_dir.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        return False, f"Create playlist failed: {exc}", None
+    return True, f"Created playlist: {name}", playlist_dir
+
+
+def _rename_selected_playlist(
+    state: AppState,
+    playlists: list[Path],
+    raw_name: str,
+) -> tuple[bool, str, Path | None]:
+    root = state.ui.playlists_root
+    if root is None:
+        return False, "No playlists root configured", None
+    if not playlists:
+        return False, "No playlist selected", None
+
+    new_name = _normalize_playlist_name(raw_name)
+    if not new_name:
+        return False, "Invalid playlist name", None
+
+    current = playlists[state.ui.selected_index]
+    target = root / new_name
+    if current == target:
+        return False, "Playlist name unchanged", None
+    if target.exists():
+        return False, f"Playlist already exists: {new_name}", None
+
+    try:
+        current.rename(target)
+    except OSError as exc:
+        return False, f"Rename playlist failed: {exc}", None
+    return True, f"Renamed playlist: {current.name} -> {new_name}", target
+
+
+def _normalize_playlist_name(raw_name: str) -> str | None:
+    name = raw_name.strip().strip("\"'")
+    if not name:
+        return None
+    if "/" in name or "\\" in name:
+        return None
+    if name in {".", ".."}:
+        return None
+    return name
 
 
 def _play_index(
@@ -628,6 +953,10 @@ def _flush_pending_seek(
     player: FFplayBackend,
     analyzer: FFMpegSpectrumAnalyzer,
 ) -> None:
+    if not _can_play_entries(state):
+        state.ui.pending_seek_delta = 0.0
+        state.ui.pending_seek_deadline = 0.0
+        return
     if state.ui.pending_seek_delta == 0:
         return
     if time.monotonic() < state.ui.pending_seek_deadline:

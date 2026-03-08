@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -14,6 +15,7 @@ class UIState:
     command_prefix: str = ":"
     command_buffer: str = ""
     command_cursor: int = 0
+    command_intent: str | None = None
     download_in_progress: bool = False
     search_query: str = ""
     search_results: list[int] = field(default_factory=list)
@@ -23,6 +25,9 @@ class UIState:
     pending_seek_delta: float = 0.0
     pending_seek_deadline: float = 0.0
     last_pause_toggle_at: float = 0.0
+    playlists_root: Path | None = None
+    current_dir: Path | None = None
+    in_playlist_view: bool = False
 
 
 @dataclass(slots=True)
