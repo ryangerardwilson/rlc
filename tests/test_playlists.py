@@ -3,6 +3,7 @@ from pathlib import Path
 from rlc.library.scanner import list_playlists, scan_playlist_tracks
 from rlc.state import AppState
 from rlc.ui.curses_app import (
+    _restore_selection,
     _create_playlist,
     _current_download_dir,
     _normalize_playlist_name,
@@ -95,3 +96,17 @@ def test_open_rename_prompt_prefills_selected_playlist_name(tmp_path: Path) -> N
     assert state.ui.command_buffer == "Two"
     assert state.ui.command_cursor == 3
     assert state.ui.command_intent == "rename_playlist"
+
+
+def test_restore_selection_prefers_currently_playing_track(tmp_path: Path) -> None:
+    state = AppState()
+    a = tmp_path / "a.mp3"
+    b = tmp_path / "b.mp3"
+    c = tmp_path / "c.mp3"
+    tracks = [a, b, c]
+    state.playback.now_playing_path = b
+    state.ui.selected_index = 0
+
+    _restore_selection(state, tracks, preferred=state.playback.now_playing_path, fallback=a)
+
+    assert state.ui.selected_index == 1

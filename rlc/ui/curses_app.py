@@ -87,16 +87,28 @@ def _run(stdscr: curses.window, config: AppConfig) -> int:
             _flush_pending_seek(state, tracks, player, analyzer)
             should_rescan = _process_download_events(state, download_results)
             if should_rescan:
+                previous_selected = _selected_entry(tracks, state.ui.selected_index)
                 tracks = _reload_entries(state, config.startup_track)
-                _clamp_selection(state, tracks)
+                _restore_selection(
+                    state,
+                    tracks,
+                    preferred=state.playback.now_playing_path,
+                    fallback=previous_selected,
+                )
                 _recompute_search_results(state, tracks)
             if download_thread and not download_thread.is_alive():
                 download_thread = None
             if state.ui.download_in_progress:
+                previous_selected = _selected_entry(tracks, state.ui.selected_index)
                 updated_tracks = _reload_entries(state, config.startup_track)
                 if len(updated_tracks) != len(tracks):
                     tracks = updated_tracks
-                    _clamp_selection(state, tracks)
+                    _restore_selection(
+                        state,
+                        tracks,
+                        preferred=state.playback.now_playing_path,
+                        fallback=previous_selected,
+                    )
                     _recompute_search_results(state, tracks)
 
             key = stdscr.getch()
@@ -772,6 +784,32 @@ def _clamp_selection(state: AppState, tracks: list[Path]) -> None:
     state.ui.selected_index = min(state.ui.selected_index, len(tracks) - 1)
 
 
+def _selected_entry(tracks: list[Path], index: int) -> Path | None:
+    if not tracks:
+        return None
+    safe_index = max(0, min(index, len(tracks) - 1))
+    return tracks[safe_index]
+
+
+def _restore_selection(
+    state: AppState,
+    tracks: list[Path],
+    *,
+    preferred: Path | None,
+    fallback: Path | None,
+) -> None:
+    if not tracks:
+        state.ui.selected_index = 0
+        return
+    if preferred in tracks:
+        state.ui.selected_index = tracks.index(preferred)
+        return
+    if fallback in tracks:
+        state.ui.selected_index = tracks.index(fallback)
+        return
+    _clamp_selection(state, tracks)
+
+
 def _reload_entries(state: AppState, startup_track: Path | None) -> list[Path]:
     if startup_track and startup_track.exists() and startup_track.is_file():
         return [startup_track]
@@ -930,6 +968,7 @@ def _play_index(
         analyzer.start(track)
         state.ui.selected_index = safe_index
         state.playback.now_playing = track.name
+        state.playback.now_playing_path = track
         state.playback.is_playing = True
         state.playback.is_paused = False
         state.playback.elapsed_seconds = 0.0

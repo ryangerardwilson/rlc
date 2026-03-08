@@ -33,6 +33,7 @@ class UIState:
 @dataclass(slots=True)
 class PlaybackState:
     now_playing: str | None = None
+    now_playing_path: Path | None = None
     is_playing: bool = False
     is_paused: bool = False
     suppress_autonext_once: bool = False
