@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.s
 Install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh | bash -s -- --version 0.1.0
+curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh | bash -s -- -v 0.1.0
 ```
 
 ### From source
@@ -103,6 +103,19 @@ Playback behavior:
 - `yt-dlp` available in `PATH` (for `:` YouTube downloads)
 
 If `ffplay` is missing, playback will not start.
+
+---
+
+## Version And Upgrade
+
+```bash
+rlc -v
+rlc -u
+```
+
+`rlc -v` prints the installed app version from the runtime `_version.py`
+module. Source checkouts keep a placeholder `0.0.0`; tagged release builds
+stamp the shipped artifact with the real version.
 
 ---
 

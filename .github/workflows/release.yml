@@ -60,7 +60,7 @@ jobs:
               "$PYBIN" -m pip install -U pip
               "$PYBIN" -m pip install --only-binary=:all: pyinstaller mutagen
 
-              sed -i -E "s/^__version__ = \".*\"/__version__ = \"${VERSION}\"/" rlc/_version.py
+              sed -i -E "s/^__version__ = \".*\"/__version__ = \"${VERSION}\"/" _version.py
 
               "$PYBIN" -m PyInstaller --clean --onedir --name rlc \
                 --collect-all mutagen \

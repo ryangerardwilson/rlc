@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
+from pathlib import Path
 
 from rlc import __version__
 from rlc.app import run_app
 from rlc.config import build_app_config, default_config_path, load_user_config, save_user_config
+
+INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,8 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-v",
-        action="version",
-        version=__version__,
+        dest="version",
+        action="store_true",
         help="Show version and exit",
     )
     parser.add_argument(
@@ -48,9 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if args.version:
+        print(__version__)
+        return 0
 
     if args.upgrade:
         return _upgrade_to_latest()
@@ -112,24 +118,18 @@ def _bootstrap_first_run_config(*, config_path: Path, cli_music_dir: str | None)
 
 
 def _upgrade_to_latest() -> int:
-    curl = shutil.which("curl")
-    bash = shutil.which("bash")
-    if not curl:
-        print("curl not found in PATH.", file=sys.stderr)
-        return 1
-    if not bash:
-        print("bash not found in PATH.", file=sys.stderr)
-        return 1
-
-    url = "https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh"
-    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-
+    with urllib.request.urlopen(INSTALL_SCRIPT_URL, timeout=20) as response:
+        script_body = response.read()
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(script_body)
+        tmp_path = Path(handle.name)
     try:
-        fetch = subprocess.run([curl, "-fsSL", url, "-o", str(tmp_path)])
-        if fetch.returncode != 0:
-            return fetch.returncode
-        run = subprocess.run([bash, str(tmp_path)])
+        tmp_path.chmod(0o700)
+        run = subprocess.run(
+            ["/usr/bin/env", "bash", str(tmp_path), "-u"],
+            check=False,
+            text=True,
+        )
         return run.returncode
     finally:
         try:
