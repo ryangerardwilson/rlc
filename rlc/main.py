@@ -1,22 +1,58 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
-import tempfile
-import urllib.request
 from pathlib import Path
 
-from rlc import __version__
-from rlc.app import run_app
+from _version import __version__
+from rgw_cli_contract import AppSpec, resolve_install_script_path, run_app
+
+from rlc.app import run_app as run_tui
 from rlc.config import build_app_config, default_config_path, load_user_config, save_user_config
 
-INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh"
+INSTALL_SCRIPT = resolve_install_script_path(Path(__file__).resolve().parents[1] / "main.py")
+HELP_TEXT = """rlc
+
+flags:
+  rlc -h
+    show this help
+  rlc -v
+    print the installed version
+  rlc -u
+    upgrade to the latest release
+
+features:
+  launch the curses music player with your saved library
+  # rlc
+  rlc
+
+  play a specific track immediately
+  # rlc <track_path>
+  rlc ~/Music/song.mp3
+
+  use a directory for this run without changing saved config
+  # rlc <music_dir>
+  rlc ~/Music
+
+  open the user config in your editor
+  # rlc conf
+  rlc conf
+"""
+CONFIG_BOOTSTRAP_TEXT = '{\n  "music_dir": "",\n  "fps": 20\n}\n'
+APP_SPEC = AppSpec(
+    app_name="rlc",
+    version=__version__,
+    help_text=HELP_TEXT,
+    install_script_path=INSTALL_SCRIPT,
+    no_args_mode="dispatch",
+    config_path_factory=default_config_path,
+    config_bootstrap_text=CONFIG_BOOTSTRAP_TEXT,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="rlc terminal music player",
+        prog="rlc",
         add_help=False,
     )
     parser.add_argument(
@@ -30,37 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
         dest="config",
         help="Path to config file (defaults to $XDG_CONFIG_HOME/rlc/config.json)",
     )
-    parser.add_argument(
-        "-v",
-        dest="version",
-        action="store_true",
-        help="Show version and exit",
-    )
-    parser.add_argument(
-        "-u",
-        dest="upgrade",
-        action="store_true",
-        help="Upgrade to latest release using install.sh",
-    )
-    parser.add_argument(
-        "-h",
-        action="help",
-        help="Show usage summary",
-    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    return run_app(APP_SPEC, args, _dispatch)
+
+
+def _dispatch(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-
-    if args.version:
-        print(__version__)
-        return 0
-
-    if args.upgrade:
-        return _upgrade_to_latest()
-
     target_music_dir: str | None = None
     startup_track: Path | None = None
     if args.target:
@@ -89,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         config_path=config_path,
     )
     config.startup_track = startup_track
-    return run_app(config)
+    return run_tui(config)
 
 
 def _bootstrap_first_run_config(*, config_path: Path, cli_music_dir: str | None) -> None:
@@ -115,27 +131,6 @@ def _bootstrap_first_run_config(*, config_path: Path, cli_music_dir: str | None)
     chosen = raw or default_dir
     resolved = str(Path(chosen).expanduser().resolve())
     save_user_config(config_path, music_dir=resolved)
-
-
-def _upgrade_to_latest() -> int:
-    with urllib.request.urlopen(INSTALL_SCRIPT_URL, timeout=20) as response:
-        script_body = response.read()
-    with tempfile.NamedTemporaryFile(delete=False) as handle:
-        handle.write(script_body)
-        tmp_path = Path(handle.name)
-    try:
-        tmp_path.chmod(0o700)
-        run = subprocess.run(
-            ["/usr/bin/env", "bash", str(tmp_path), "-u"],
-            check=False,
-            text=True,
-        )
-        return run.returncode
-    finally:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 if __name__ == "__main__":

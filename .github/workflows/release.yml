@@ -58,13 +58,13 @@ jobs:
               PYBIN="/opt/py/python/bin/python3"
               export LD_LIBRARY_PATH="/opt/py/python/lib:${LD_LIBRARY_PATH:-}"
               "$PYBIN" -m pip install -U pip
-              "$PYBIN" -m pip install --only-binary=:all: pyinstaller mutagen
+              "$PYBIN" -m pip install --only-binary=:all: pyinstaller mutagen rgw-cli-contract==0.1.1
 
               sed -i -E "s/^__version__ = \".*\"/__version__ = \"${VERSION}\"/" _version.py
 
               "$PYBIN" -m PyInstaller --clean --onedir --name rlc \
                 --collect-all mutagen \
-                rlc/main.py
+                main.py
 
               tar -C dist -czf rlc-linux-x64.tar.gz rlc
             '

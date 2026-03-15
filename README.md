@@ -44,6 +44,7 @@ rlc /path/to/song.mp3     # open rlc and auto-play this track (with visualizer)
 rlc /path/to/music_dir    # open rlc using this directory for this run
 rlc -f 30                 # set UI render rate
 rlc -c ~/.config/rlc/config.json  # explicit config path
+rlc conf                  # open the default config in your editor
 rlc -v                    # print version
 rlc -u                    # upgrade to latest release
 rlc -h                    # show usage summary
