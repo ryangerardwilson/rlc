@@ -75,13 +75,21 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' is required"
 }
 
-get_latest_version() {
+latest_version_from_redirect() {
   require_command curl
+  curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" \
+    | sed -n 's#.*/releases/tag/v\([^/?#[:space:]]*\).*#\1#p'
+}
+
+get_latest_version() {
   if [[ -z "$latest_version_cache" ]]; then
-    latest_version_cache="$(
-      curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p'
-    )"
+    if command -v gh >/dev/null 2>&1; then
+      latest_version_cache="$(gh release view --repo "${REPO}" --json tagName --jq '.tagName' 2>/dev/null || true)"
+      latest_version_cache="${latest_version_cache#v}"
+    fi
+    if [[ -z "$latest_version_cache" ]]; then
+      latest_version_cache="$(latest_version_from_redirect || true)"
+    fi
     [[ -n "$latest_version_cache" ]] || die "unable to determine latest release"
   fi
   printf '%s\n' "$latest_version_cache"
