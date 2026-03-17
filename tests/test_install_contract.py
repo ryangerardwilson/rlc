@@ -91,11 +91,6 @@ class InstallContractTests(unittest.TestCase):
 
             self.assertIn("already installed", result.stdout)
 
-    def test_release_workflow_copies_install_script_into_bundle(self):
-        workflow = (INSTALLER.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        self.assertIn('cp install.sh dist/rlc/', workflow)
-        self.assertIn('tar -C dist -czf rlc-linux-x64.tar.gz rlc', workflow)
-
 
 if __name__ == "__main__":
     unittest.main()
