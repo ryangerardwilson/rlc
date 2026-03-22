@@ -18,6 +18,13 @@ The fastest way to install `rlc` is the prebuilt release bundle:
 curl -fsSL https://raw.githubusercontent.com/ryangerardwilson/rlc/main/install.sh | bash
 ```
 
+Manually add this to `~/.bashrc`, then reload your shell:
+
+```bash
+export PATH="$HOME/.rlc/bin:$PATH"
+source ~/.bashrc
+```
+
 Install a specific version:
 
 ```bash
