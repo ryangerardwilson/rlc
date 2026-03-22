@@ -65,6 +65,7 @@ jobs:
               "$PYBIN" -m PyInstaller --clean --onedir --name rlc \
                 --collect-all mutagen \
                 main.py
+              "$PYBIN" .github/scripts/clear-execstack.py dist/rlc
 
               cp install.sh dist/rlc/
               tar -C dist -czf rlc-linux-x64.tar.gz rlc
