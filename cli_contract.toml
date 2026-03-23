@@ -4,3 +4,6 @@ repo = "ryangerardwilson/rlc"
 install_strategy = "standalone-binary"
 release_asset = "rlc-linux-x64.tar.gz"
 install_test_path = "tests/test_install_contract.py"
+
+[launcher]
+env_path_prepend = ["$HOME/.local/bin"]
